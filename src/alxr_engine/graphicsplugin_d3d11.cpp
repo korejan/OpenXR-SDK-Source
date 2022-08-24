@@ -191,10 +191,14 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 #endif
         CHECK_HRCMD(m_device->CreateDeferredContext(0, m_uploadContext.ReleaseAndGetAddressOf()));
         CHECK(m_uploadContext != nullptr);
-        
-        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(VideoShaderHlsl, "MainVS", "vs_5_0");
-        CHECK_HRCMD(m_device->CreateVertexShader(vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
-            m_videoVertexShader.ReleaseAndGetAddressOf()));
+
+        const auto videoShaderStr = MakeVideoShaderHlslStr(m_isMultiViewSupported);
+        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(videoShaderStr.c_str(), "MainVS", "vs_5_0");
+        CHECK_HRCMD(m_device->CreateVertexShader
+        (
+            vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
+            m_videoVertexShader.ReleaseAndGetAddressOf())
+        );
 
         std::size_t shaderIndex = 0;
         for (const auto mainName : { "MainPS",
@@ -204,16 +208,16 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
                                      "MainBlend3PlaneFmtPS",
                                      "MainMask3PlaneFmtPS" })
         {
-            const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(VideoShaderHlsl, mainName, "ps_5_0");
+            const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(videoShaderStr.c_str(), mainName, "ps_5_0");
             CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes->GetBufferPointer(), pixelShaderBytes->GetBufferSize(), nullptr,
                 m_videoPixelShader[shaderIndex++].ReleaseAndGetAddressOf()));
         }
 
-        constexpr const D3D11_INPUT_ELEMENT_DESC vertexDesc[] = {
+        constexpr static const D3D11_INPUT_ELEMENT_DESC vertexDesc[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
             {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
         };
-        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)ArraySize(vertexDesc), vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), &m_quadInputLayout));
+        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)std::size(vertexDesc), vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), &m_quadInputLayout));
 
         using namespace Geometry;
 
@@ -240,11 +244,18 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     void InitializeResources() {
-        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(ShaderHlsl, "MainVS", "vs_5_0");
+        D3D11_FEATURE_DATA_D3D11_OPTIONS3 options{
+            .VPAndRTArrayIndexFromAnyShaderFeedingRasterizer = false
+        };
+        m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options));
+        m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
+
+        const auto& shaderStr = m_isMultiViewSupported ? MultiViewShaderHlsl : ShaderHlsl;
+        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(shaderStr, "MainVS", "vs_5_0");
         CHECK_HRCMD(m_device->CreateVertexShader(vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
                                                  m_vertexShader.ReleaseAndGetAddressOf()));
 
-        const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(ShaderHlsl, "MainPS", "ps_5_0");
+        const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(shaderStr, "MainPS", "ps_5_0");
         CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes->GetBufferPointer(), pixelShaderBytes->GetBufferSize(), nullptr,
                                                 m_pixelShader.ReleaseAndGetAddressOf()));
 
@@ -259,7 +270,11 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         const CD3D11_BUFFER_DESC modelConstantBufferDesc(sizeof(ModelConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
         CHECK_HRCMD(m_device->CreateBuffer(&modelConstantBufferDesc, nullptr, m_modelCBuffer.ReleaseAndGetAddressOf()));
 
-        const CD3D11_BUFFER_DESC viewProjectionConstantBufferDesc(sizeof(ViewProjectionConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
+        const CD3D11_BUFFER_DESC viewProjectionConstantBufferDesc
+        (
+            m_isMultiViewSupported ? sizeof(MultiViewProjectionConstantBuffer) : sizeof(ViewProjectionConstantBuffer),
+            D3D11_BIND_CONSTANT_BUFFER
+        );
         CHECK_HRCMD(
             m_device->CreateBuffer(&viewProjectionConstantBufferDesc, nullptr, m_viewProjectionCBuffer.ReleaseAndGetAddressOf()));
 
@@ -318,12 +333,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         return swapchainImageBase;
     }
 
-    ComPtr<ID3D11DepthStencilView> GetDepthStencilView(ID3D11Texture2D* colorTexture) {
+    ComPtr<ID3D11DepthStencilView> GetDepthStencilView(ID3D11Texture2D* colorTexture, const D3D11_DSV_DIMENSION viewDimension = D3D11_DSV_DIMENSION_TEXTURE2D) {
         // If a depth-stencil view has already been created for this back-buffer, use it.
         auto depthBufferIt = m_colorToDepthMap.find(colorTexture);
         if (depthBufferIt != m_colorToDepthMap.end()) {
             return depthBufferIt->second;
         }
+        assert(colorTexture != nullptr);
 
         // This back-buffer has no corresponding depth-stencil texture, so create one with matching dimensions.
         D3D11_TEXTURE2D_DESC colorDesc;
@@ -335,15 +351,18 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             .MipLevels = 1,
             .ArraySize = colorDesc.ArraySize,            
             .Format = DXGI_FORMAT_R32_TYPELESS,
-            .SampleDesc {.Count = 1},
+            .SampleDesc {.Count = 1,.Quality = 0},
+            .Usage = D3D11_USAGE_DEFAULT,
             .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_DEPTH_STENCIL,
+            .CPUAccessFlags = 0,
+            .MiscFlags = 0
         };
         ComPtr<ID3D11Texture2D> depthTexture;
         CHECK_HRCMD(m_device->CreateTexture2D(&depthDesc, nullptr, depthTexture.ReleaseAndGetAddressOf()));
 
         // Create and cache the depth stencil view.
         ComPtr<ID3D11DepthStencilView> depthStencilView;
-        const CD3D11_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc(D3D11_DSV_DIMENSION_TEXTURE2D, DXGI_FORMAT_D32_FLOAT);
+        const CD3D11_DEPTH_STENCIL_VIEW_DESC depthStencilViewDesc(viewDimension, DXGI_FORMAT_D32_FLOAT);
         CHECK_HRCMD(m_device->CreateDepthStencilView(depthTexture.Get(), &depthStencilViewDesc, depthStencilView.GetAddressOf()));
         depthBufferIt = m_colorToDepthMap.insert(std::make_pair(colorTexture, depthStencilView)).first;
 
@@ -357,9 +376,147 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     template < typename RenderFun >
+    void RenderMultiViewImpl(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+        int64_t swapchainFormat, const ALXR::CColorType& clearColour, RenderFun&& renderFn) {
+        assert(IsMultiViewEnabled());
+
+        ID3D11Texture2D* const colorTexture = reinterpret_cast<const XrSwapchainImageD3D11KHR*>(swapchainImage)->texture;
+
+        const CD3D11_VIEWPORT viewport((float)layerView.subImage.imageRect.offset.x, (float)layerView.subImage.imageRect.offset.y,
+            (float)layerView.subImage.imageRect.extent.width,
+            (float)layerView.subImage.imageRect.extent.height);
+        m_deviceContext->RSSetViewports(1, &viewport);
+
+        // Create RenderTargetView with original swapchain format (swapchain is typeless).
+        ComPtr<ID3D11RenderTargetView> renderTargetView;
+        const CD3D11_RENDER_TARGET_VIEW_DESC renderTargetViewDesc(D3D11_RTV_DIMENSION_TEXTURE2DARRAY, (DXGI_FORMAT)swapchainFormat);
+        CHECK_HRCMD(
+            m_device->CreateRenderTargetView(colorTexture, &renderTargetViewDesc, renderTargetView.ReleaseAndGetAddressOf()));
+
+        const ComPtr<ID3D11DepthStencilView> depthStencilView = GetDepthStencilView(colorTexture, D3D11_DSV_DIMENSION_TEXTURE2DARRAY);
+
+        // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified view.
+        // TODO: Do not clear to a color when using a pass-through view configuration.
+        m_deviceContext->ClearRenderTargetView(renderTargetView.Get(), clearColour);//);
+        m_deviceContext->ClearDepthStencilView(depthStencilView.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+
+        ID3D11RenderTargetView* renderTargets[] = { renderTargetView.Get() };
+        m_deviceContext->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, depthStencilView.Get());
+
+        renderFn();
+    }
+
+    virtual void RenderMultiView
+    (
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::int64_t swapchainFormat, const PassthroughMode mode,
+        const std::vector<Cube>& cubes
+    ) override
+    {
+        RenderMultiViewImpl(layerViews[0], swapchainImage, swapchainFormat, ALXR::ClearColors[ClearColorIndex(mode)], [&]()
+        {
+            MultiViewProjectionConstantBuffer viewProjections;
+            for (std::uint32_t viewIndex = 0; viewIndex < 2; ++viewIndex)
+            {
+                const auto& layerView = layerViews[viewIndex];
+                const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
+                XrMatrix4x4f projectionMatrix;
+                XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
+
+                // Set shaders and constant buffers.
+                XMStoreFloat4x4(&viewProjections.ViewProjection[viewIndex], XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+            }
+            m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjections, 0, 0);
+
+            ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
+            m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+            m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
+
+            // Set cube primitive data.
+            constexpr static const UINT strides[] = { sizeof(Geometry::Vertex) };
+            constexpr static const UINT offsets[] = { 0 };
+            ID3D11Buffer* vertexBuffers[] = { m_cubeVertexBuffer.Get() };
+            m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
+            m_deviceContext->IASetIndexBuffer(m_cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+            m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            m_deviceContext->IASetInputLayout(m_inputLayout.Get());
+
+            // Render each cube
+            for (const Cube& cube : cubes) {
+                // Compute and update the model transform.
+                ModelConstantBuffer model;
+                XMStoreFloat4x4(&model.Model,
+                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * LoadXrPose(cube.Pose)));
+                m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
+
+                // Draw the cube.
+                m_deviceContext->DrawIndexedInstanced((UINT)std::size(Geometry::c_cubeIndices), 2, 0, 0, 0);
+            }
+        });
+    }
+
+    virtual void RenderVideoMultiView
+    (
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t swapchainFormat,
+        const PassthroughMode newMode /*= PassthroughMode::None*/
+    ) override
+    {
+        RenderMultiViewImpl(layerViews[0], swapchainImage, swapchainFormat, ALXR::VideoClearColors[ClearColorIndex(newMode)], [&]()
+        {
+            if (currentTextureIdx == std::size_t(-1))
+                return;
+            const auto& videoTex = m_videoTextures[currentTextureIdx];
+
+            // Set shaders and constant buffers.
+            MultiViewProjectionConstantBuffer viewProjections;
+            for (std::size_t vindex = 0; vindex < 2; ++vindex) {
+                XMStoreFloat4x4(&viewProjections.ViewProjection[vindex], XMMatrixIdentity());
+            }
+            m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjections, 0, 0);
+
+            ModelConstantBuffer model;
+            XMStoreFloat4x4(&model.Model, XMMatrixIdentity());
+            m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
+
+            const bool is3PlaneFormat = videoTex.chromaVSRV != nullptr;
+            ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
+            m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
+            m_deviceContext->PSSetShader(m_videoPixelShader[VideoShaderIndex(is3PlaneFormat, newMode)].Get(), nullptr, 0);
+
+            const std::array<ID3D11ShaderResourceView*, 3> srvs{
+                videoTex.lumaSRV.Get(),
+                videoTex.chromaSRV.Get(),
+                videoTex.chromaVSRV.Get()
+            };
+            const UINT srvSize = is3PlaneFormat ? (UINT)srvs.size() : 2u;
+            m_deviceContext->PSSetShaderResources(0, srvSize, srvs.data());
+
+            const std::array<ID3D11SamplerState*, 2> samplers = { m_lumaSampler.Get(), m_chromaSampler.Get() };
+            m_deviceContext->PSSetSamplers(0, (UINT)samplers.size(), samplers.data());
+
+            using namespace Geometry;
+            // Set cube primitive data.
+            constexpr static const UINT strides[] = { sizeof(QuadVertex) };
+            constexpr static const UINT offsets[] = { 0 };
+            ID3D11Buffer* const vertexBuffers[] = { m_quadVertexBuffer.Get() };
+            m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
+            m_deviceContext->IASetIndexBuffer(m_quadIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+            m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            m_deviceContext->IASetInputLayout(m_quadInputLayout.Get());
+
+            m_deviceContext->DrawIndexedInstanced((UINT)QuadIndices.size(), 2, 0, 0, 0);
+        });
+    }
+
+    template < typename RenderFun >
     void RenderViewImpl(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
                     int64_t swapchainFormat, const ALXR::CColorType& clearColour, RenderFun&& renderFn) {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
+        assert(!IsMultiViewEnabled());
 
         ID3D11Texture2D* const colorTexture = reinterpret_cast<const XrSwapchainImageD3D11KHR*>(swapchainImage)->texture;
 
@@ -898,6 +1055,10 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         m_clearColorIndex = newMode-1;
     }
 
+    virtual inline bool IsMultiViewEnabled() const override {
+        return m_isMultiViewSupported;
+    }
+
 #include "cuda/d3d11cuda_interop.inl"
 
    private:
@@ -952,6 +1113,8 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
     static_assert(XR_ENVIRONMENT_BLEND_MODE_OPAQUE == 1);
     std::size_t m_clearColorIndex{ (XR_ENVIRONMENT_BLEND_MODE_OPAQUE - 1) };
+
+    bool m_isMultiViewSupported = false;
 };
 }  // namespace
 

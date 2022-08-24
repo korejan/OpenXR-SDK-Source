@@ -7,18 +7,54 @@
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 
 #include <array>
+#include <string>
 #include <DirectXMath.h>
 
-struct ModelConstantBuffer {
+struct alignas(16) ModelConstantBuffer {
     DirectX::XMFLOAT4X4 Model;
 };
 struct alignas(16) ViewProjectionConstantBuffer {
     DirectX::XMFLOAT4X4 ViewProjection;
-    std::uint32_t ViewID; // Should really be using SV_ViewID/multi-view instancing.
+    std::uint32_t ViewID;
+};
+
+struct alignas(16) MultiViewProjectionConstantBuffer {
+    DirectX::XMFLOAT4X4 ViewProjection[2];
 };
 
 // Separate entrypoints for the vertex and pixel shader functions.
-constexpr char ShaderHlsl[] = R"_(
+constexpr inline char MultiViewShaderHlsl[] = R"_(
+    struct PSVertex {
+        float4 Pos : SV_POSITION;
+        float3 Color : COLOR0;
+        uint ViewId : SV_RenderTargetArrayIndex;
+    };
+    struct Vertex {
+        float3 Pos : POSITION;
+        float3 Color : COLOR0;
+        uint InstId : SV_InstanceID;
+    };
+    cbuffer ModelConstantBuffer : register(b0) {
+        float4x4 Model;
+    };
+    cbuffer ViewProjectionConstantBuffer : register(b1) {
+        float4x4 ViewProjection[2];
+    };
+
+    PSVertex MainVS(Vertex input) {
+        PSVertex output;
+        output.Pos = mul(mul(float4(input.Pos, 1), Model), ViewProjection[input.InstId]);
+        output.Color = input.Color;
+        output.ViewId = input.InstId;
+        return output;
+    }
+
+    float4 MainPS(PSVertex input) : SV_TARGET {
+        return float4(input.Color, 1);
+    }
+    )_";
+
+constexpr inline char ShaderHlsl[] = R"_(
     struct PSVertex {
         float4 Pos : SV_POSITION;
         float3 Color : COLOR0;
@@ -84,7 +120,7 @@ constexpr inline DXGI_FORMAT GetChromaVFormat(const DXGI_FORMAT yuvFmt) {
     return DXGI_FORMAT::DXGI_FORMAT_UNKNOWN;
 }
 
-constexpr const char VideoShaderHlsl[] = R"_(
+constexpr inline const char VideoVShaderHlsl[] = R"_(
     struct PSVertex {
         float4 Pos : SV_POSITION;
         float2 uv : TEXCOORD;
@@ -101,13 +137,6 @@ constexpr const char VideoShaderHlsl[] = R"_(
         uint ViewID;
     };
 
-    Texture2D<float>  tex_y : register(t0);
-    Texture2D<float2> tex_uv : register(t1);
-    Texture2D<float>  tex_v : register(t2);
-    
-    SamplerState y_sampler : register(s0);
-    SamplerState uv_sampler : register(s1);
-
     PSVertex MainVS(Vertex input) {
         PSVertex output;
         output.Pos = mul(mul(float4(input.Pos, 1), Model), ViewProjection);
@@ -117,6 +146,45 @@ constexpr const char VideoShaderHlsl[] = R"_(
         }
         return output;
     }
+    )_";
+
+constexpr inline const char VideoMultiViewVShaderHlsl[] = R"_(
+    struct PSVertex {
+        float4 Pos : SV_POSITION;
+        float2 uv : TEXCOORD;
+        uint ViewId : SV_RenderTargetArrayIndex;
+    };
+    struct Vertex {
+        float3 Pos : POSITION;
+        float2 uv : TEXCOORD;
+        uint InstId : SV_InstanceID;
+    };
+    cbuffer ModelConstantBuffer : register(b0) {
+        float4x4 Model;
+    };
+    cbuffer ViewProjectionConstantBuffer : register(b1) {
+        float4x4 ViewProjection[2];
+    };
+
+    PSVertex MainVS(Vertex input) {
+        PSVertex output;
+        output.Pos = mul(mul(float4(input.Pos, 1), Model), ViewProjection[input.InstId]);
+        output.ViewId = input.InstId;
+        output.uv = input.uv;
+        if (input.InstId > 0) {
+            output.uv.x += 0.5f;
+        }
+        return output;
+    }
+    )_";
+
+constexpr inline const char VideoPShaderHlsl[] = R"_(
+    Texture2D<float>  tex_y : register(t0);
+    Texture2D<float2> tex_uv : register(t1);
+    Texture2D<float>  tex_v : register(t2);
+    
+    SamplerState y_sampler : register(s0);
+    SamplerState uv_sampler : register(s1);
 
     // Derived from https://msdn.microsoft.com/en-us/library/windows/desktop/dd206750(v=vs.85).aspx
     // Section: Converting 8-bit YUV to RGB888
@@ -208,7 +276,15 @@ constexpr const char VideoShaderHlsl[] = R"_(
 
         return sRGBToLinearRGB(float4(rgb,alpha));
     }
-)_";
+    )_";
+
+constexpr inline std::string MakeVideoShaderHlslStr(const bool withMultiVew) {
+    const auto& videoVertexShader = withMultiVew ? VideoMultiViewVShaderHlsl : VideoVShaderHlsl;
+    std::string videoShaderStr = videoVertexShader;
+    videoShaderStr += '\n';
+    videoShaderStr += VideoPShaderHlsl;
+    return videoShaderStr;
+}
 
 namespace ALXR {
     using CColorType = DirectX::XMVECTORF32;

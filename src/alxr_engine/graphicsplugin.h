@@ -72,7 +72,7 @@ struct IGraphicsPlugin {
         const PassthroughMode /*newMode*/,
         const std::vector<Cube>& cubes
     ) = 0;
-    
+
     virtual void BeginVideoView() {}
     virtual void EndVideoView() {}
 
@@ -84,6 +84,25 @@ struct IGraphicsPlugin {
         const std::int64_t /*swapchainFormat*/,
         const PassthroughMode /*newMode*/ = PassthroughMode::None
     ) {}
+
+    virtual void RenderMultiView
+    (
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::int64_t swapchainFormat,
+        const PassthroughMode /*newMode*/,
+        const std::vector<Cube>& cubes
+    ) {}
+
+    virtual void RenderVideoMultiView
+    (
+        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const XrSwapchainImageBaseHeader* /*swapchainImage*/,
+        const std::int64_t /*swapchainFormat*/,
+        const PassthroughMode /*newMode*/ = PassthroughMode::None
+    ) {}
+
+    virtual bool IsMultiViewEnabled() const { return false; }
 
     // Get recommended number of sub-data element samples in view (recommendedSwapchainSampleCount)
     // if supported by the graphics plugin. A supported value otherwise.

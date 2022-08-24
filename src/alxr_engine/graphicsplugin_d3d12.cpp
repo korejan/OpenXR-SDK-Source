@@ -281,20 +281,26 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         TypeCount
     };
 
+    using VideoPShaderList = std::array<const ComPtr<ID3DBlob>, VideoPShader::TypeCount>;
+    static inline VideoPShaderList MakeVideoPShaderList() {
+        const auto videoShaderStr = MakeVideoShaderHlslStr(/*multi-view=*/false);
+        return
+        {
+            CompileShader(videoShaderStr.c_str(), "MainPS", "ps_5_1"),
+            CompileShader(videoShaderStr.c_str(), "MainBlendPS", "ps_5_1"),
+            CompileShader(videoShaderStr.c_str(), "MainMaskPS", "ps_5_1"),
+            CompileShader(videoShaderStr.c_str(), "Main3PlaneFmtPS", "ps_5_1"),
+            CompileShader(videoShaderStr.c_str(), "MainBlend3PlaneFmtPS", "ps_5_1"),
+            CompileShader(videoShaderStr.c_str(), "MainMask3PlaneFmtPS", "ps_5_1")
+        };
+    }
+
     D3D12GraphicsPlugin(const std::shared_ptr<Options>&, std::shared_ptr<IPlatformPlugin>)
     : m_vertexShaderBytes(CompileShader(ShaderHlsl, "MainVS", "vs_5_1")),
       m_pixelShaderBytes(CompileShader(ShaderHlsl, "MainPS", "ps_5_1")),
-      m_videoVShaderBytes(CompileShader(VideoShaderHlsl, "MainVS", "vs_5_1")),
-      m_videoPShaderBytes(CompileShader(VideoShaderHlsl, "MainPS", "ps_5_1")),
-      m_video3PlaneFmtPShaderBytes(CompileShader(VideoShaderHlsl, "Main3PlaneFmtPS", "ps_5_1")),
-      m_videoPShaderBlobList {
-          CompileShader(VideoShaderHlsl, "MainPS", "ps_5_1"),
-          CompileShader(VideoShaderHlsl, "MainBlendPS", "ps_5_1"),
-          CompileShader(VideoShaderHlsl, "MainMaskPS", "ps_5_1"),
-          CompileShader(VideoShaderHlsl, "Main3PlaneFmtPS", "ps_5_1"),
-          CompileShader(VideoShaderHlsl, "MainBlend3PlaneFmtPS", "ps_5_1"),
-          CompileShader(VideoShaderHlsl, "MainMask3PlaneFmtPS", "ps_5_1")
-      } {}
+      m_videoVShaderBytes(CompileShader(VideoVShaderHlsl, "MainVS", "vs_5_1")),
+      m_videoPShaderBlobList(MakeVideoPShaderList())
+    {}
 
     inline ~D3D12GraphicsPlugin() override { CloseHandle(m_fenceEvent); }
 
@@ -1538,10 +1544,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
     ComPtr<ID3D12Resource>         m_quadVertexBuffer{};
     ComPtr<ID3D12Resource>         m_quadIndexBuffer{};
     const ComPtr<ID3DBlob>         m_videoVShaderBytes;
-    const ComPtr<ID3DBlob>         m_videoPShaderBytes;
-    const ComPtr<ID3DBlob>         m_video3PlaneFmtPShaderBytes;
-
-    using VideoPShaderList = std::array<const ComPtr<ID3DBlob>, VideoPShader::TypeCount>;
+    
     const VideoPShaderList         m_videoPShaderBlobList;
 
     ComPtr<ID3D12CommandAllocator> m_videoTexCmdAllocator{};
