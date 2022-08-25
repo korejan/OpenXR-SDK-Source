@@ -247,8 +247,9 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         D3D11_FEATURE_DATA_D3D11_OPTIONS3 options{
             .VPAndRTArrayIndexFromAnyShaderFeedingRasterizer = false
         };
-        m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options));
-        m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
+        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options)))) {
+            m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
+        }
 
         const auto& shaderStr = m_isMultiViewSupported ? MultiViewShaderHlsl : ShaderHlsl;
         const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(shaderStr, "MainVS", "vs_5_0");
