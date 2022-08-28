@@ -50,6 +50,8 @@
 #endif
 #endif
 
+//#define ALXR_ENGINE_ENABLE_VIZ_SPACES
+
 namespace {
 #if !defined(XR_USE_PLATFORM_WIN32)
 #define strcpy_s(dest, source) strncpy((dest), (source), sizeof(dest))
@@ -478,7 +480,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         { XR_PICO_FRAME_END_INFO_EXT_EXTENSION_NAME, false },
         { XR_PICO_ANDROID_CONTROLLER_FUNCTION_EXT_ENABLE_EXTENSION_NAME, false },
         { XR_PICO_CONFIGS_EXT_EXTENSION_NAME, false },
-        { XR_PICO_RESET_SENSOR_EXTENSION_NAME, false }
+        { XR_PICO_RESET_SENSOR_EXTENSION_NAME, false },
+        { XR_PICO_SESSION_BEGIN_INFO_EXT_ENABLE_EXTENSION_NAME, false },
+        { XR_PICO_SINGLEPASS_ENABLE_EXTENSION_NAME, false }
 #endif
     };
     ExtensionMap m_supportedGraphicsContexts = {
@@ -974,6 +978,14 @@ struct OpenXrProgram final : IOpenXrProgram {
         {
             Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_PICO_RESET_SENSOR_EXTENSION_NAME));
             GetPicoInstanceProcAddr("xrResetSensorPICO", m_pfnResetSensorPICO);
+        }
+
+        if (IsExtEnabled(XR_PICO_SESSION_BEGIN_INFO_EXT_ENABLE_EXTENSION_NAME)) {
+            Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_PICO_SESSION_BEGIN_INFO_EXT_ENABLE_EXTENSION_NAME));
+        }
+
+        if (IsExtEnabled(XR_PICO_SINGLEPASS_ENABLE_EXTENSION_NAME)) {
+            Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_PICO_SINGLEPASS_ENABLE_EXTENSION_NAME));
         }
         
         if (m_pfnSetConfigPICO) {
@@ -1620,9 +1632,20 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
             case XR_SESSION_STATE_READY: {
                 CHECK(m_session != XR_NULL_HANDLE);
-                const XrSessionBeginInfo sessionBeginInfo{
+#ifdef XR_USE_OXR_PICO
+                const XrSessionBeginInfoEXT sessionBeginInfoExt {
                     .type = XR_TYPE_SESSION_BEGIN_INFO,
                     .next = nullptr,
+                    .enableSinglePass = m_isMultiViewEnabled
+                };
+#endif
+                const XrSessionBeginInfo sessionBeginInfo{
+                    .type = XR_TYPE_SESSION_BEGIN_INFO,
+#ifdef XR_USE_OXR_PICO
+                    .next = &sessionBeginInfoExt,
+#else
+                    .next = nullptr,
+#endif
                     .primaryViewConfigurationType = m_viewConfigType
                 };
                 XrResult result;

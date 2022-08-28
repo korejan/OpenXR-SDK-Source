@@ -631,11 +631,13 @@ struct ShaderProgram {
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderInfo{{
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext = nullptr
+            .pNext = nullptr,
+            .pSpecializationInfo = nullptr
         },
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .pNext = nullptr
+            .pNext = nullptr,
+            .pSpecializationInfo = nullptr
         }
     }};
 
@@ -897,10 +899,10 @@ struct Texture {
             .mipLevels = 1,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,//(VkSampleCountFlagBits)swapchainCreateInfo.sampleCount,
-            .tiling = imageTiling, //VK_IMAGE_TILING_LINEAR,
+            .tiling = imageTiling,
             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .initialLayout = m_vkLayout = VK_IMAGE_LAYOUT_UNDEFINED // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;//VK_IMAGE_LAYOUT_UNDEFINED,
+            .initialLayout = m_vkLayout = VK_IMAGE_LAYOUT_UNDEFINED
         };
         CHECK_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &texImage));
 
@@ -950,10 +952,10 @@ struct Texture {
             .mipLevels = 1,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,//(VkSampleCountFlagBits)swapchainCreateInfo.sampleCount,
-            .tiling = imageTiling, //VK_IMAGE_TILING_LINEAR,
+            .tiling = imageTiling,
             .usage = usage,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .initialLayout = m_vkLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, //VK_IMAGE_LAYOUT_UNDEFINED;// VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// VK_IMAGE_LAYOUT_UNDEFINED;// VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;// VK_IMAGE_LAYOUT_UNDEFINED; // VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;//VK_IMAGE_LAYOUT_UNDEFINED,            
+            .initialLayout = m_vkLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         };
         CHECK_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &texImage));
 
@@ -1478,31 +1480,74 @@ struct RenderPass {
     VkFormat colorFmt{};
     VkFormat depthFmt{};
     VkRenderPass pass{VK_NULL_HANDLE};
+    std::uint32_t arraySize = 0;
 
     RenderPass() = default;
 
-    bool Create(VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt) {
+    bool Create(VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt, const std::uint32_t arraySizeParam) {
         m_vkDevice = device;
         colorFmt = aColorFmt;
         depthFmt = aDepthFmt;
+        arraySize = arraySizeParam;
+        assert(arraySize > 0);
+        const bool isMultiView = arraySize > 1;
+
+        // Subpass dependencies for layout transitions
+        constexpr static const std::array<const VkSubpassDependency, 1> dependencies {
+            VkSubpassDependency {
+                .srcSubpass      = VK_SUBPASS_EXTERNAL,
+                .dstSubpass      = 0,
+                .srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                .dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .srcAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
+                .dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+            },
+        };
+        //
+        //  Setup multiview info for the renderpass
+        //
+        //  Bit mask that specifies which view rendering is broadcast to
+        //  0011 = Broadcast to first and second view (layer)
+        //
+        constexpr static const std::uint32_t viewMask = 0b00000011;
+        //
+        //  Bit mask that specifies correlation between views
+        //  An implementation may use this for optimizations (concurrent render)
+        //
+        constexpr static const std::uint32_t correlationMask = 0b00000011;
+
+        constexpr static const VkRenderPassMultiviewCreateInfoKHR renderPassMultiviewCI {
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .subpassCount = 1,
+            .pViewMasks = &viewMask,
+            .correlationMaskCount = 1,
+            .pCorrelationMasks = &correlationMask,
+        };
 
         VkSubpassDescription subpass = {
+            .flags = 0,
             .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
         };
         std::array<VkAttachmentDescription, 2> at = {};
-        VkRenderPassCreateInfo rpInfo {
+        VkRenderPassCreateInfo rpInfo{
             .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+            .pNext = isMultiView ? &renderPassMultiviewCI : nullptr,
             .attachmentCount = 0,
             .pAttachments = at.data(),
             .subpassCount = 1,
-            .pSubpasses = &subpass
+            .pSubpasses = &subpass,
+            .dependencyCount = isMultiView ? (std::uint32_t)dependencies.size() : 0,
+            .pDependencies = isMultiView ? dependencies.data() : nullptr
         };
-        VkAttachmentReference colorRef = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+        VkAttachmentReference colorRef {
+            .attachment = 0,
+            .layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        };
         if (colorFmt != VK_FORMAT_UNDEFINED) {
             Log::Write(Log::Level::Info, Fmt("setting color frame layout, format: %ld", colorFmt));
-
             colorRef.attachment = rpInfo.attachmentCount++;
-
             at[colorRef.attachment] = {
                 .format = colorFmt,
                 .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -1513,15 +1558,16 @@ struct RenderPass {
                 .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,//VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             };
-
             subpass.colorAttachmentCount = 1;
             subpass.pColorAttachments = &colorRef;
         }
 
-        VkAttachmentReference depthRef = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+        VkAttachmentReference depthRef {
+            .attachment = 1,
+            .layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        };
         if (depthFmt != VK_FORMAT_UNDEFINED) {
             depthRef.attachment = rpInfo.attachmentCount++;
-
             at[depthRef.attachment] = {
                 .format = depthFmt,
                 .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -1529,10 +1575,9 @@ struct RenderPass {
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                 .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                 .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, //VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
             };
-
             subpass.pDepthStencilAttachment = &depthRef;
         }
 
@@ -1601,6 +1646,7 @@ struct RenderTarget {
         swap(fb, other.fb);
         swap(m_vkDevice, other.m_vkDevice);
     }
+
     RenderTarget& operator=(RenderTarget&& other) noexcept {
         if (&other == this) {
             return *this;
@@ -1616,11 +1662,15 @@ struct RenderTarget {
         swap(m_vkDevice, other.m_vkDevice);
         return *this;
     }
+
     void Create(VkDevice device, VkImage aColorImage, VkImage aDepthImage, VkExtent2D size, RenderPass& renderPass) {
         m_vkDevice = device;
 
         colorImage = aColorImage;
         depthImage = aDepthImage;
+        assert(renderPass.arraySize > 0);
+        const bool isMultiView = renderPass.arraySize > 1;
+        const VkImageViewType viewType = isMultiView ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 
         uint32_t attachmentCount = 0;
         std::array<VkImageView, 2> attachments{};
@@ -1630,8 +1680,9 @@ struct RenderTarget {
             const VkImageViewCreateInfo colorViewInfo {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext = nullptr,
+                .flags = 0,
                 .image = colorImage,
-                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .viewType = viewType,
                 .format = renderPass.colorFmt,
                 .components {
                     .r = VK_COMPONENT_SWIZZLE_R,
@@ -1644,7 +1695,7 @@ struct RenderTarget {
                     .baseMipLevel = 0,
                     .levelCount = 1,
                     .baseArrayLayer = 0,
-                    .layerCount = 1
+                    .layerCount = renderPass.arraySize
                 }
             };
             CHECK_VKCMD(vkCreateImageView(m_vkDevice, &colorViewInfo, nullptr, &colorView));
@@ -1656,8 +1707,9 @@ struct RenderTarget {
             const VkImageViewCreateInfo depthViewInfo {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
                 .pNext = nullptr,
+                .flags = 0,
                 .image = depthImage,
-                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .viewType = viewType,
                 .format = renderPass.depthFmt,
                 .components {
                     .r = VK_COMPONENT_SWIZZLE_R,
@@ -1670,7 +1722,7 @@ struct RenderTarget {
                     .baseMipLevel = 0,
                     .levelCount = 1,
                     .baseArrayLayer = 0,
-                    .layerCount = 1
+                    .layerCount = renderPass.arraySize
                 }
             };
             CHECK_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthView));
@@ -1700,6 +1752,10 @@ private:
 struct alignas(16) ViewProjectionUniform {
     XrMatrix4x4f mvp;
     std::uint32_t ViewID; // Should really be using SV_ViewID/multi-view instancing.
+};
+
+struct alignas(16) MultiViewProjectionUniform {
+    XrMatrix4x4f mvp[2];
 };
 
 // Simple vertex MVP xform & color fragment shader layout
@@ -1747,16 +1803,16 @@ struct PipelineLayout {
     }
 
     // Simple vertex MVP xform & color fragment shader layout
-    void Create(VkDevice device, VkInstance vkinstance) {
+    void Create(VkDevice device, VkInstance vkinstance, const bool isMultiView) {
         CHECK(device != VK_NULL_HANDLE && vkinstance != VK_NULL_HANDLE);
         Clear();
         m_vkDevice = device;
         m_vkinstance = vkinstance;
         // MVP matrix is a push_constant
-        constexpr const VkPushConstantRange pcr {
+        const VkPushConstantRange pcr {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
             .offset = 0,
-            .size = sizeof(ViewProjectionUniform) //4 * 4 * sizeof(float),
+            .size = (std::uint32_t)(isMultiView ? sizeof(MultiViewProjectionUniform) : sizeof(ViewProjectionUniform)),
         };
         const VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -1778,7 +1834,7 @@ struct PipelineLayout {
     void CreateVideoStreamLayout
     (
         const VkSamplerYcbcrConversionCreateInfo& conversionInfo,
-        VkDevice device, VkInstance vkinstance
+        VkDevice device, VkInstance vkinstance, const bool isMultiview
     )
     {
         CHECK(device != VK_NULL_HANDLE && vkinstance != VK_NULL_HANDLE);
@@ -1841,10 +1897,10 @@ struct PipelineLayout {
         CHECK_VKCMD(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout));
 
         // MVP matrix is a push_constant
-        constexpr const VkPushConstantRange pcr {
+        const VkPushConstantRange pcr {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
             .offset = 0,            
-            .size = sizeof(ViewProjectionUniform) //4 * 4 * sizeof(float);
+            .size = (std::uint32_t)(isMultiview ? sizeof(MultiViewProjectionUniform) : sizeof(ViewProjectionUniform)),
         };
         const VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -2068,7 +2124,7 @@ struct DepthBuffer {
     void Create(VkDevice device, MemoryAllocator* memAllocator, VkFormat depthFormat,
                 const XrSwapchainCreateInfo& swapchainCreateInfo) {
         m_vkDevice = device;
-
+        assert(swapchainCreateInfo.arraySize > 0);
         const VkExtent2D size = {swapchainCreateInfo.width, swapchainCreateInfo.height};
         // Create a D32 depthbuffer
         const VkImageCreateInfo imageInfo {
@@ -2083,7 +2139,7 @@ struct DepthBuffer {
                 .depth = 1
              },
             .mipLevels = 1,
-            .arrayLayers = 1,            
+            .arrayLayers = swapchainCreateInfo.arraySize,
             .samples = (VkSampleCountFlagBits)swapchainCreateInfo.sampleCount,
             .tiling = VK_IMAGE_TILING_OPTIMAL,
             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
@@ -2136,21 +2192,28 @@ struct SwapchainImageContext {
     RenderPass rp{};
     Pipeline pipe{};
     XrStructureType swapchainImageType;
+    std::uint32_t arraySize = 0;
 
     SwapchainImageContext() = default;
 
-    std::vector<XrSwapchainImageBaseHeader*> Create(VkDevice device, MemoryAllocator* memAllocator, uint32_t capacity,
-                                                    const XrSwapchainCreateInfo& swapchainCreateInfo, const PipelineLayout& layout,
-                                                    const ShaderProgram& sp, const VertexBuffer<Geometry::Vertex>& vb) {//const VertexBuffer<Geometry::QuadVertex>& vb) {
+    std::vector<XrSwapchainImageBaseHeader*> Create
+    (
+        VkDevice device, MemoryAllocator* memAllocator, uint32_t capacity,
+        const XrSwapchainCreateInfo& swapchainCreateInfo, const PipelineLayout& layout,
+        const ShaderProgram& sp, const VertexBuffer<Geometry::Vertex>& vb
+    )
+    {
         m_vkDevice = device;
-
+        arraySize = swapchainCreateInfo.arraySize;
+        assert(arraySize > 0);
         size = {swapchainCreateInfo.width, swapchainCreateInfo.height};
-        VkFormat colorFormat = (VkFormat)swapchainCreateInfo.format;
-        VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
-        // XXX handle swapchainCreateInfo.sampleCount
 
+        const VkFormat colorFormat = static_cast<VkFormat>(swapchainCreateInfo.format);
+        const VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+        // XXX handle swapchainCreateInfo.sampleCount
+        
         depthBuffer.Create(m_vkDevice, memAllocator, depthFormat, swapchainCreateInfo);
-        rp.Create(m_vkDevice, colorFormat, depthFormat);
+        rp.Create(m_vkDevice, colorFormat, depthFormat, arraySize);
         pipe.Create(m_vkDevice, size, layout, rp, sp, vb);
 
         swapchainImages.resize(capacity);
@@ -2462,6 +2525,60 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         return nullptr;
     }
 
+    using DeviceMultiviewFeature = std::tuple<
+        VkPhysicalDeviceMultiviewFeaturesKHR,
+        VkPhysicalDeviceMultiviewPropertiesKHR
+    >;
+    DeviceMultiviewFeature GetMultiviewFeature() const
+    {
+        assert(m_vkPhysicalDevice != VK_NULL_HANDLE && m_vkInstance != VK_NULL_HANDLE);
+#if 1
+        const PFN_vkGetPhysicalDeviceFeatures2KHR fpGetPhysicalDeviceFeatures2
+            = (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR");
+        if (fpGetPhysicalDeviceFeatures2 == nullptr) {
+            throw std::runtime_error(
+                "Vulkan: Proc address for \"vkGetPhysicalDeviceFeatures2KHR\" not "
+                "found.\n");
+        }
+        const PFN_vkGetPhysicalDeviceProperties2KHR fpGetPhysicalDeviceProperties2
+            = (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR");
+        if (fpGetPhysicalDeviceProperties2 == nullptr) {
+            throw std::runtime_error(
+                "Vulkan: Proc address for \"vkGetPhysicalDeviceProperties2KHR\" not "
+                "found.\n");
+        }
+#else
+        constexpr const PFN_vkGetPhysicalDeviceFeatures2KHR fpGetPhysicalDeviceFeatures2 =
+            vkGetPhysicalDeviceFeatures2KHR;
+        constexpr const PFN_vkGetPhysicalDeviceProperties2 fpGetPhysicalDeviceProperties2 =
+            vkGetPhysicalDeviceProperties2;
+#endif
+        VkPhysicalDeviceMultiviewFeaturesKHR extFeatures {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR,
+            .pNext = nullptr,
+            .multiview = VK_FALSE,
+            .multiviewGeometryShader = VK_FALSE,
+            .multiviewTessellationShader = VK_FALSE
+        };
+        VkPhysicalDeviceFeatures2KHR deviceFeatures2 {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
+            .pNext = &extFeatures
+        };
+        fpGetPhysicalDeviceFeatures2(m_vkPhysicalDevice, &deviceFeatures2);
+
+        VkPhysicalDeviceMultiviewPropertiesKHR extProps {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES_KHR,
+            .maxMultiviewViewCount = 0,
+        };
+        VkPhysicalDeviceProperties2KHR deviceProps2{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR,
+            .pNext = &extProps
+        };
+        fpGetPhysicalDeviceProperties2(m_vkPhysicalDevice, &deviceProps2);
+
+        return std::make_tuple(extFeatures, extProps);
+    }
+
     void InitDeviceUUID()
     {
         CHECK(m_vkPhysicalDevice != VK_NULL_HANDLE)
@@ -2510,31 +2627,6 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             Log::Write(Log::Level::Warning, "No validation layers found in the system, skipping");
         }
 #endif
-
-        const std::vector<const char*> deviceExtensions =
-        {
-#if defined(USE_MIRROR_WINDOW)
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-#endif
-            //VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-            //VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
-            //VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
-#ifdef XR_USE_PLATFORM_ANDROID
-            VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
-            VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
-#else
-    #ifdef _WIN64
-            VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
-    #else
-            VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
-    #endif
-            //VK_KHR_timeline_semaphore
-            VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
-#endif
-            VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
-        };
 
         const std::vector<const char*> extensions =
         {
@@ -2652,12 +2744,58 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             }
         }
 
+        std::vector<const char*> deviceExtensions =
+        {
+#if defined(USE_MIRROR_WINDOW)
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#endif
+            //VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            //VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+            //VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME,
+#ifdef XR_USE_PLATFORM_ANDROID
+            VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+            VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
+#else
+    #ifdef _WIN64
+            VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME,
+    #else
+            VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+            VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
+    #endif
+            //VK_KHR_timeline_semaphore
+            VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+#endif
+            VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
+        };
+
+        const auto [multiviewFeature, multiviewProps] = GetMultiviewFeature();
+        if (multiviewFeature.multiview && multiviewProps.maxMultiviewViewCount > 1) {
+            m_isMultiViewSupported = true;
+            deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);            
+            Log::Write(Log::Level::Verbose, Fmt(
+                "VulkanGraphicsPlugin: Multiview features:\n"
+                "\tmultiview: %s\n"
+                "\tmultiviewGeometryShader: %s\n"
+                "\tmultiviewTessellationShader: %s",
+                multiviewFeature.multiview ? "true" : "false",
+                multiviewFeature.multiviewGeometryShader ? "true" : "false",
+                multiviewFeature.multiviewTessellationShader ? "true" : "false"));
+            Log::Write(Log::Level::Verbose, Fmt(
+                "VulkanGraphicsPlugin: Multiview properties:\n"
+                "\tmaxMultiviewViewCount: %d\n"
+                "\tmaxMultiviewInstanceIndex: %d",
+                multiviewProps.maxMultiviewViewCount,
+                multiviewProps.maxMultiviewInstanceIndex));
+        }
+
         VkPhysicalDeviceFeatures features{};
         // features.samplerAnisotropy = VK_TRUE;
         VkPhysicalDeviceVulkan11Features features11 {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
             .pNext = nullptr,
-            .samplerYcbcrConversion = VK_TRUE
+            .multiview = m_isMultiViewSupported ? VK_TRUE : VK_FALSE,
+            .samplerYcbcrConversion = VK_TRUE,
         };
         const VkPhysicalDeviceFeatures2 features2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
@@ -2798,10 +2936,16 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 #ifdef XR_ENABLE_CUDA_INTEROP
         InitCuda();
 #endif
-        using CodeBuffer = ShaderProgram::CodeBuffer;
-        const CodeBuffer videoVShaderSPIRV = SPV_PREFIX
+
+        const CodeBuffer plainVideoVShaderSPIRV = SPV_PREFIX
 #include "video_vert.spv"
         SPV_SUFFIX;
+
+        const CodeBuffer multivewVideoVShaderSPIRV = SPV_PREFIX
+#include "multiviewVideo_vert.spv"
+        SPV_SUFFIX;
+
+        const auto& videoVShaderSPIRV = IsMultiViewEnabled() ? multivewVideoVShaderSPIRV : plainVideoVShaderSPIRV;
         {
             const CodeBuffer videoFShaderSPIRV = SPV_PREFIX
 #include "video_frag.spv"
@@ -2845,18 +2989,28 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         m_quadBuffer.UpdateVertices(Geometry::QuadVertices.data(), quadVertexCount, 0);
     }
 
+    using CodeBuffer = ShaderProgram::CodeBuffer;
+
     void InitializeResources() {
 #ifdef USE_ONLINE_VULKAN_SHADERC
         auto vertexSPIRV = CompileGlslShader("vertex", shaderc_glsl_default_vertex_shader, VertexShaderGlsl);
         auto fragmentSPIRV = CompileGlslShader("fragment", shaderc_glsl_default_fragment_shader, FragmentShaderGlsl);
 #else
-        const std::vector<uint32_t> vertexSPIRV = SPV_PREFIX
+
+        const CodeBuffer plainVertexSPIRV = SPV_PREFIX
 #include "vert.spv"
             SPV_SUFFIX;
-        const std::vector<uint32_t> fragmentSPIRV = SPV_PREFIX
+
+        const CodeBuffer mulviewVertexSPIRV = SPV_PREFIX
+#include "multivew_vert.spv"
+            SPV_SUFFIX;
+
+        const CodeBuffer fragmentSPIRV = SPV_PREFIX
 #include "frag.spv"
             SPV_SUFFIX;
 #endif
+
+        const auto& vertexSPIRV = IsMultiViewEnabled() ? mulviewVertexSPIRV : plainVertexSPIRV;
         if (vertexSPIRV.empty()) THROW("Failed to compile vertex shader");
         if (fragmentSPIRV.empty()) THROW("Failed to compile fragment shader");
 
@@ -2866,7 +3020,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
         if (!m_cmdBuffer.Init(m_vkDevice, m_queueFamilyIndex)) THROW("Failed to create command buffer");
 
-        m_pipelineLayout.Create(m_vkDevice, m_vkInstance);
+        m_pipelineLayout.Create(m_vkDevice, m_vkInstance, m_isMultiViewSupported);
 
         static_assert(sizeof(Geometry::Vertex) == 24, "Unexpected Vertex size");
         m_drawBuffer.Init(m_vkDevice, &m_memAllocator,
@@ -2937,20 +3091,19 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     template < typename RenderFunc >
-    inline void RenderViewImpl(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-        int64_t /*swapchainFormat*/, RenderFunc&& renderFun) {
-        CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
+    inline void RenderViewImpl(const XrSwapchainImageBaseHeader* swapchainImage, RenderFunc&& renderFun) {
 
-        const auto swapchainContext = m_swapchainImageContextMap[swapchainImage];
-        const std::uint32_t imageIndex = swapchainContext->ImageIndex(swapchainImage);
+        const auto swapchainContextPtr = m_swapchainImageContextMap[swapchainImage];
+        assert(swapchainContextPtr != nullptr);
+        const std::uint32_t imageIndex = swapchainContextPtr->ImageIndex(swapchainImage);
 
         m_cmdBuffer.Reset();
         m_cmdBuffer.Begin();
 
         // Ensure depth is in the right layout
-        swapchainContext->depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        swapchainContextPtr->depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-        renderFun(imageIndex, swapchainContext);
+        renderFun(imageIndex, *swapchainContextPtr);
 
         m_cmdBuffer.End();
 #if 1 //#ifdef XR_USE_PLATFORM_ANDROID
@@ -2975,18 +3128,16 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     using OpaqueClear = ClearValueT;
     using AdditiveClear = ClearValueT;
     using AlphaBlendClear = ClearValueT;
+    using CColorType = std::array<const float, 3>;
+    constexpr static const CColorType DarkGraySlate{ 0.184313729f, 0.309803933f, 0.309803933f };
+    constexpr static const CColorType CClear { 0.0f, 0.0f, 0.0f };
 
-    constexpr static const VkClearValue ClearDepthStencilValue {
+    constexpr static const VkClearValue ClearDepthStencilValue{
         .depthStencil {
             .depth = 1.0f,
             .stencil = 0
         }
     };
-
-    using CColorType = std::array<const float, 3>;
-    constexpr static const CColorType DarkGraySlate{ 0.184313729f, 0.309803933f, 0.309803933f };
-    constexpr static const CColorType CClear { 0.0f, 0.0f, 0.0f };
-
     constexpr static const std::array<const ClearValueT, 4> ConstClearValues{
         OpaqueClear {
             VkClearValue {.color {.float32 = { DarkGraySlate[0], DarkGraySlate[1], DarkGraySlate[2], 1.0f}}},
@@ -3031,13 +3182,16 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         return ptMode == PassthroughMode::None ? m_clearColorIndex : 3u;
     }
 
-    void RenderView
+    void RenderMultiView
     (
-        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-        const std::int64_t swapchainFormat, const PassthroughMode newMode,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::int64_t /*swapchainFormat*/,
+        const PassthroughMode newMode,
         const std::vector<Cube>& cubes
     ) override {
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, [&, this](const std::uint32_t imageIndex, const auto swapchainContext)
+        assert(m_isMultiViewSupported);
+        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
         {
             const auto& clearValues = ConstClearValues[ClearValueIndex(newMode)];
             VkRenderPassBeginInfo renderPassBeginInfo{
@@ -3047,11 +3201,75 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 .pClearValues = clearValues.data()
             };
             // Bind and clear eye render target
-            swapchainContext->BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
 
             vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, swapchainContext->pipe.pipe);
+            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, swapchainContext.pipe.pipe);
+
+            // Bind index and vertex buffers
+            vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
+
+            // Compute the view-projection transform.
+            // Note all matrixes (including OpenXR's) are column-major, right-handed.
+
+            std::array<XrMatrix4x4f,2> vps;
+            for (std::size_t viewIndex = 0; viewIndex < layerViews.size(); ++viewIndex) {
+                const auto& layerView = layerViews[viewIndex];
+                const auto& pose = layerView.pose;
+                XrMatrix4x4f proj;
+                XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
+                XrMatrix4x4f toView;
+                constexpr const XrVector3f scale{ 1.f, 1.f, 1.f };
+                XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
+                XrMatrix4x4f view;
+                XrMatrix4x4f_InvertRigidBody(&view, &toView);
+                //XrMatrix4x4f vp;
+                XrMatrix4x4f_Multiply(&vps[viewIndex], &proj, &view);
+            }
+
+            // Render each cube
+            for (const Cube& cube : cubes) {
+                // Compute the model-view-projection transform and push it.
+                MultiViewProjectionUniform mvps;
+                for (std::size_t viewIndex = 0; viewIndex < layerViews.size(); ++viewIndex) {
+                    XrMatrix4x4f model;
+                    XrMatrix4x4f_CreateTranslationRotationScale(&model, &cube.Pose.position, &cube.Pose.orientation, &cube.Scale);
+                    XrMatrix4x4f_Multiply(&mvps.mvp[viewIndex], &vps[viewIndex], &model);
+                }
+                vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MultiViewProjectionUniform), &mvps);
+
+                // Draw the cube.
+                vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
+            }
+
+            vkCmdEndRenderPass(m_cmdBuffer.buf);
+        });
+    }
+
+    void RenderView
+    (
+        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::int64_t /*swapchainFormat*/, const PassthroughMode newMode,
+        const std::vector<Cube>& cubes
+    ) override {
+        assert(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
+        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
+        {
+            const auto& clearValues = ConstClearValues[ClearValueIndex(newMode)];
+            VkRenderPassBeginInfo renderPassBeginInfo{
+                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                .pNext = nullptr,
+                .clearValueCount = (uint32_t)clearValues.size(),
+                .pClearValues = clearValues.data()
+            };
+            // Bind and clear eye render target
+            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+
+            vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, swapchainContext.pipe.pipe);
 
             // Bind index and vertex buffers
             vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
@@ -3064,7 +3282,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             XrMatrix4x4f proj;
             XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
             XrMatrix4x4f toView;
-            XrVector3f scale{ 1.f, 1.f, 1.f };
+            constexpr const XrVector3f scale{ 1.f, 1.f, 1.f };
             XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
             XrMatrix4x4f view;
             XrMatrix4x4f_InvertRigidBody(&view, &toView);
@@ -3231,7 +3449,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         //ClearVideoTextures();
         /////////////////////////
         assert(m_videoStreamLayout.IsNull());
-        m_videoStreamLayout.CreateVideoStreamLayout(conversionInfo, m_vkDevice, m_vkInstance);
+        m_videoStreamLayout.CreateVideoStreamLayout(conversionInfo, m_vkDevice, m_vkInstance, m_isMultiViewSupported);
         CHECK(m_swapchainImageContexts.size() > 0);
         const auto& swapChainInfo = m_swapchainImageContexts.back();
         std::size_t pipelineIdx = 0;
@@ -3841,14 +4059,63 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 #endif
     }
 
+    virtual void RenderVideoMultiView
+    (
+        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t /*swapchainFormat*/,
+        const PassthroughMode newMode /*= PassthroughMode::None*/
+    ) override
+    {
+        assert(m_isMultiViewSupported);
+        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
+        {
+            const auto& clearValues = VideoClearValues[ClearValueIndex(newMode)];
+            VkRenderPassBeginInfo renderPassBeginInfo{
+                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                .pNext = nullptr,
+                .clearValueCount = (uint32_t)clearValues.size(),
+                .pClearValues = clearValues.data()
+            };
+            // Bind and clear eye render target
+            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+
+#ifdef XR_USE_PLATFORM_ANDROID
+            if (m_currentTexture.texture.texImage == VK_NULL_HANDLE)
+                return;
+            m_currentTexture.texture.TransitionLayout(m_cmdBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+#else
+            if (textureIdx == std::size_t(-1))
+                return;
+#endif
+            vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamPipelines[static_cast<std::size_t>(newMode)].pipe);
+            vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamLayout.layout, 0, 1, m_descriptorSets.data(), 0, nullptr);
+
+            // Bind index and vertex buffers
+            vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_quadBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_quadBuffer.vtxBuf, &offset);
+
+            MultiViewProjectionUniform mvp1;
+            XrMatrix4x4f_CreateIdentity(&mvp1.mvp[0]);
+            XrMatrix4x4f_CreateIdentity(&mvp1.mvp[1]);
+            
+            vkCmdPushConstants(m_cmdBuffer.buf, m_videoStreamLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MultiViewProjectionUniform), &mvp1);
+            vkCmdDrawIndexed(m_cmdBuffer.buf, m_quadBuffer.count.idx, 1, 0, 0, 0);
+
+            vkCmdEndRenderPass(m_cmdBuffer.buf);
+        });
+    }
+
     virtual void RenderVideoView
     (
-        const std::uint32_t viewID, const XrCompositionLayerProjectionView& layerView,
-        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t swapchainFormat,
+        const std::uint32_t viewID, const XrCompositionLayerProjectionView& /*layerView*/,
+        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t /*swapchainFormat*/,
         const PassthroughMode mode /*= PassthroughMode::None*/
     ) override
     {
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, [&, this](const std::uint32_t imageIndex, const auto swapchainContext)
+        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
         {
             const auto& clearValues = VideoClearValues[ClearValueIndex(mode)];
             VkRenderPassBeginInfo renderPassBeginInfo{
@@ -3858,7 +4125,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 .pClearValues = clearValues.data()
             };
             // Bind and clear eye render target
-            swapchainContext->BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
 
 #ifdef XR_USE_PLATFORM_ANDROID
             if (m_currentTexture.texture.texImage == VK_NULL_HANDLE)
@@ -3892,6 +4159,10 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
         m_clearColorIndex = (newMode - 1);
     }
+
+    virtual inline bool IsMultiViewEnabled() const override {
+        return m_isMultiViewSupported;
+    }
     
     virtual ~VulkanGraphicsPlugin() override {
         ClearImageDescriptorSetLayouts();
@@ -3924,6 +4195,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     CmdBuffer m_cmdBuffer{};
     PipelineLayout m_pipelineLayout{};
     VertexBuffer<Geometry::Vertex> m_drawBuffer{};
+    bool m_isMultiViewSupported = false;
 
 // BEGIN VIDEO STREAM DATA /////////////////////////////////////////////////////////////
     std::array<std::uint8_t, VK_UUID_SIZE> m_vkDeviceUUID{};
@@ -4086,7 +4358,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         for (size_t i = 0; i < swapChainCount; ++i)
         {
             const VkDescriptorImageInfo imageInfo{
-                .sampler = m_videoStreamLayout.textureSampler,//vidTexture.textureSampler;
+                .sampler = m_videoStreamLayout.textureSampler,
                 .imageView = vidTexture.imageView,
                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             };

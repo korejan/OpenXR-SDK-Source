@@ -87,11 +87,11 @@ struct IGraphicsPlugin {
 
     virtual void RenderMultiView
     (
-        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
-        const XrSwapchainImageBaseHeader* swapchainImage,
-        const std::int64_t swapchainFormat,
+        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const XrSwapchainImageBaseHeader* /*swapchainImage*/,
+        const std::int64_t /*swapchainFormat*/,
         const PassthroughMode /*newMode*/,
-        const std::vector<Cube>& cubes
+        const std::vector<Cube>& /*cubes*/
     ) {}
 
     virtual void RenderVideoMultiView
