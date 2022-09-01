@@ -7,7 +7,9 @@
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 
 #include <array>
+#include <vector>
 #include <string>
+#include <filesystem>
 #include <DirectXMath.h>
 
 struct alignas(16) ModelConstantBuffer {
@@ -85,6 +87,7 @@ constexpr inline char ShaderHlsl[] = R"_(
 DirectX::XMMATRIX XM_CALLCONV LoadXrPose(const XrPosef& pose);
 DirectX::XMMATRIX XM_CALLCONV LoadXrMatrix(const XrMatrix4x4f& matrix);
 
+std::vector<std::uint8_t> LoadCompiledShaderObject(const std::filesystem::path& csoFile);
 Microsoft::WRL::ComPtr<ID3DBlob> CompileShader(const char* hlsl, const char* entrypoint, const char* shaderTarget);
 Microsoft::WRL::ComPtr<IDXGIAdapter1> GetAdapter(LUID adapterId);
 

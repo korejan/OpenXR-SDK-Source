@@ -309,6 +309,88 @@ else()
     endfunction()
 endif()
 
+# Find dxc shader compiler, for d3d12 SM6.x shaders.
+if (WIN32 AND MSVC)
+
+    find_program(DXC_COMPILER dxc.exe)
+    if(NOT (DXC_COMPILER STREQUAL "DXC_COMPILER-NOTFOUND"))
+        message(NOTICE "Found dxc: ${DXC_COMPILER}")
+    else()
+        message(NOTICE "Could NOT find dxc, using precompiled CSO files")
+    endif()
+    
+    set(DXC_FLAGS -nologo -WX -Ges -Zi -Zpc -Qstrip_reflect -Qstrip_debug -O3)
+
+    function(compile_hlsl_sm6 run_target_name)
+        set(cso_output_files "")
+        foreach(in_file IN LISTS ARGN)
+            get_filename_component(hlsl_file ${in_file} NAME_WE)            
+            string(REGEX REPLACE "([A-Za-z0-9]*)[_]" "" shader_stage ${hlsl_file})
+            
+            if(shader_stage STREQUAL "vert")
+                set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
+            elseif(shader_stage STREQUAL "frag")
+                set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
+            else()
+                set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_vert.cso)
+                set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_frag.cso)
+            endif()
+
+            if(NOT (DXC_COMPILER STREQUAL "DXC_COMPILER-NOTFOUND"))
+                if(shader_stage STREQUAL "vert")
+                    add_custom_command(
+                        OUTPUT ${vs_out_file}
+                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
+                        DEPENDS ${in_file}
+                        VERBATIM
+                    )
+                elseif(shader_stage STREQUAL "frag")
+                    add_custom_command(
+                        OUTPUT ${ps_out_file}
+                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
+                        DEPENDS ${in_file}
+                        VERBATIM
+                    )
+                else() # No shader stage specific file suffix, compile all supported stages.
+                    add_custom_command(
+                        OUTPUT ${vs_out_file}
+                        OUTPUT ${ps_out_file}
+                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
+                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
+                        DEPENDS ${in_file}
+                        VERBATIM
+                    )
+                endif()
+            else()
+                # Use the precompiled .cso files
+                get_filename_component(hlsl_src_dir ${in_file} DIRECTORY)
+                if(shader_stage STREQUAL "vert")
+                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}.cso)
+                    configure_file(${precompiled_file} ${vs_out_file} COPYONLY)
+                elseif(shader_stage STREQUAL "frag")
+                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}.cso)
+                    message(NOTICE ${precompiled_file})
+                    configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+                else() # No shader stage specific file suffix, compile all supported stages.
+                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}_vert.cso)
+                    configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}_frag.cso)
+                    configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+                endif()
+            endif()
+            list(APPEND cso_output_files ${vs_out_file} ${ps_out_file})
+        endforeach()
+        add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
+        set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
+    endfunction()
+else()
+    function(compile_hlsl_sm6 run_target_name)
+        set(cso_output_files "")
+        add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
+        set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
+    endfunction()
+endif()
+
 if(WIN32)
     add_definitions(-DXR_USE_GRAPHICS_API_D3D11)
     if(MSVC)

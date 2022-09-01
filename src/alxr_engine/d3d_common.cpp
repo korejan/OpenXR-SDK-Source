@@ -6,7 +6,8 @@
 #include "common.h"
 
 #if (defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)) && !defined(MISSING_DIRECTX_COLORS)
-
+#include <filesystem>
+#include <fstream>
 #include <common/xr_linear.h>
 #include <DirectXColors.h>
 #include <D3Dcompiler.h>
@@ -25,6 +26,32 @@ XMMATRIX XM_CALLCONV LoadXrPose(const XrPosef& pose) {
 XMMATRIX XM_CALLCONV LoadXrMatrix(const XrMatrix4x4f& matrix) {
     // XrMatrix4x4f has same memory layout as DirectX Math (Row-major,post-multiplied = column-major,pre-multiplied)
     return XMLoadFloat4x4(reinterpret_cast<const XMFLOAT4X4*>(&matrix));
+}
+
+std::vector<std::uint8_t> LoadCompiledShaderObject(const std::filesystem::path& csoFile) {
+
+    if (csoFile.empty())
+        return {};
+
+    std::ifstream inFile(csoFile, std::ios::in | std::ios::binary | std::ios::ate);
+    if (!inFile)
+        return {};
+    const std::streampos len = inFile.tellg();
+    if (!inFile)
+        return {};
+
+    std::vector<uint8_t> blob;
+    blob.resize(std::size_t(len));
+    inFile.seekg(0, std::ios::beg);
+    if (!inFile)
+        return {};
+
+    inFile.read(reinterpret_cast<char*>(blob.data()), len);
+    if (!inFile)
+        return {};
+
+    inFile.close();
+    return blob;
 }
 
 ComPtr<ID3DBlob> CompileShader(const char* hlsl, const char* entrypoint, const char* shaderTarget) {
