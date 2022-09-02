@@ -1086,6 +1086,13 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         return ptMode == PassthroughMode::None ? m_clearColorIndex : 3;
     }
 
+    inline void MakeViewProjMatrix(DirectX::XMFLOAT4X4& viewProj, const XrCompositionLayerProjectionView& layerView) {
+        const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
+        XrMatrix4x4f projectionMatrix;
+        XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
+        XMStoreFloat4x4(&viewProj, XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+    }
+
     virtual void RenderMultiView
     (
         const std::array<XrCompositionLayerProjectionView,2>& layerViews, const XrSwapchainImageBaseHeader* swapchainImage,
@@ -1112,10 +1119,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
             MultiViewProjectionConstantBuffer viewProjection{ {} };
             for (std::size_t viewIndex = 0; viewIndex < 2; ++viewIndex) {
-                const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerViews[viewIndex].pose));
-                XrMatrix4x4f projectionMatrix;
-                XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerViews[viewIndex].fov, 0.05f, 100.0f);
-                XMStoreFloat4x4(&viewProjection.ViewProjection[viewIndex], XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+                MakeViewProjMatrix(viewProjection.ViewProjection[viewIndex], layerViews[viewIndex]);
             }
 
             // Set shaders and constant buffers.
@@ -1159,14 +1163,10 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
             const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
             cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
-
-            const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
-            XrMatrix4x4f projectionMatrix;
-            XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
-
+            
             // Set shaders and constant buffers.
             ViewProjectionConstantBuffer viewProjection{ {}, 0 };
-            XMStoreFloat4x4(&viewProjection.ViewProjection, XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+            MakeViewProjMatrix(viewProjection.ViewProjection, layerView);
 
             ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
             {

@@ -1751,7 +1751,7 @@ private:
 
 struct alignas(16) ViewProjectionUniform {
     XrMatrix4x4f mvp;
-    std::uint32_t ViewID; // Should really be using SV_ViewID/multi-view instancing.
+    std::uint32_t ViewID;
 };
 
 struct alignas(16) MultiViewProjectionUniform {
@@ -3090,6 +3090,19 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         m_swapchainImageContexts.clear();
     }
 
+    static inline void MakeViewProjMatrix(XrMatrix4x4f& vp, const XrCompositionLayerProjectionView& layerView) {
+        const auto& pose = layerView.pose;
+        XrMatrix4x4f proj;
+        XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
+        XrMatrix4x4f toView;
+        constexpr static const XrVector3f scale{ 1.f, 1.f, 1.f };
+        XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
+        XrMatrix4x4f view;
+        XrMatrix4x4f_InvertRigidBody(&view, &toView);
+        //XrMatrix4x4f vp;
+        XrMatrix4x4f_Multiply(&vp, &proj, &view);
+    }
+
     template < typename RenderFunc >
     inline void RenderViewImpl(const XrSwapchainImageBaseHeader* swapchainImage, RenderFunc&& renderFun) {
 
@@ -3209,25 +3222,14 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             // Bind index and vertex buffers
             vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            VkDeviceSize offset = 0;
+            constexpr const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
 
             // Compute the view-projection transform.
             // Note all matrixes (including OpenXR's) are column-major, right-handed.
-
-            std::array<XrMatrix4x4f,2> vps;
+            std::array<XrMatrix4x4f,2> vps{};
             for (std::size_t viewIndex = 0; viewIndex < layerViews.size(); ++viewIndex) {
-                const auto& layerView = layerViews[viewIndex];
-                const auto& pose = layerView.pose;
-                XrMatrix4x4f proj;
-                XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
-                XrMatrix4x4f toView;
-                constexpr const XrVector3f scale{ 1.f, 1.f, 1.f };
-                XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
-                XrMatrix4x4f view;
-                XrMatrix4x4f_InvertRigidBody(&view, &toView);
-                //XrMatrix4x4f vp;
-                XrMatrix4x4f_Multiply(&vps[viewIndex], &proj, &view);
+                MakeViewProjMatrix(vps[viewIndex], layerViews[viewIndex]);
             }
 
             // Render each cube
@@ -3273,21 +3275,13 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             // Bind index and vertex buffers
             vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            VkDeviceSize offset = 0;
+            constexpr const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
 
             // Compute the view-projection transform.
             // Note all matrixes (including OpenXR's) are column-major, right-handed.
-            const auto& pose = layerView.pose;
-            XrMatrix4x4f proj;
-            XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
-            XrMatrix4x4f toView;
-            constexpr const XrVector3f scale{ 1.f, 1.f, 1.f };
-            XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
-            XrMatrix4x4f view;
-            XrMatrix4x4f_InvertRigidBody(&view, &toView);
             XrMatrix4x4f vp;
-            XrMatrix4x4f_Multiply(&vp, &proj, &view);
+            MakeViewProjMatrix(vp, layerView);
 
             // Render each cube
             for (const Cube& cube : cubes) {
@@ -4094,7 +4088,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             // Bind index and vertex buffers
             vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_quadBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            VkDeviceSize offset = 0;
+            constexpr const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_quadBuffer.vtxBuf, &offset);
 
             MultiViewProjectionUniform mvp1;
@@ -4142,7 +4136,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             // Bind index and vertex buffers
             vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_quadBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            VkDeviceSize offset = 0;
+            constexpr const VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_quadBuffer.vtxBuf, &offset);
 
             ViewProjectionUniform mvp1;
