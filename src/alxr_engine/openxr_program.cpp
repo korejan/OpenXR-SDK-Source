@@ -1965,7 +1965,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             if (XR_UNQUALIFIED_SUCCESS(res)) {
                 if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
                     (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-                    cubes.push_back(Cube{ spaceLocation.pose, {0.25f, 0.25f, 0.25f} });
+                    //cubes.push_back(Cube{ spaceLocation.pose, {0.25f, 0.25f, 0.25f} });
                 }
             }
             else {
@@ -1982,7 +1982,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             const auto spaceLocation = GetHandSpaceLocation(hand, predictedDisplayTime, ALXR::InfinitySpaceLoc);
             if (!spaceLocation.is_infinity()) {
                 const float scale = 0.1f * HandScale[hand];
-                cubes.push_back(Cube{ spaceLocation.pose, {scale, scale, scale} });
+                //cubes.push_back(Cube{ spaceLocation.pose, {scale, scale, scale} });
             }
             else if (m_interactionManager->IsHandActive(hand)) {
                 // Tracking loss is expected when the hand is not active so only log a message
@@ -2135,10 +2135,12 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
             };
             const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
-            if (isVideoStream)
+            if (isVideoStream) {
                 m_graphicsPlugin->RenderVideoView(i, projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, ptMode);
-            else
+            } else {
+                //Log::Write(Log::Level::Info, "chendy render loading!");
                 m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, ptMode, vizCubes);
+            }
             
             constexpr const XrSwapchainImageReleaseInfo releaseInfo{
                 .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
@@ -2232,6 +2234,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         return result;
 #else
         return 90.0f;
+        //return 72.0f;
 #endif
     }
 
@@ -2326,9 +2329,11 @@ struct OpenXrProgram final : IOpenXrProgram {
             return { m_views[0], m_views[1] };
         };
         predicateDisplayTime = frameState.predictedDisplayTime;
-        if (renderMode == RenderMode::Lobby)
+        if (renderMode == RenderMode::Lobby){
+            //Log::Write(Log::Level::Info, "chendy render defaultviews!");
             return GetDefaultViews();
-
+        }
+            
         std::shared_lock<std::shared_mutex> l(m_trackingFrameMapMutex);
         if (videoTimeStampNs != std::uint64_t(-1))
         {
@@ -2760,6 +2765,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         .trackingSpaceType = ALXRTrackingSpace::LocalRefSpace,
         .renderConfig {
             .refreshRate = 90.0f,
+            // .refreshRate = 72.0f,
             .enableFoveation = false
         }
     };

@@ -63,16 +63,20 @@ constexpr inline auto graphics_api_str(const ALXRGraphicsApi gcp)
     switch (gcp)
     {
     case ALXRGraphicsApi::Vulkan2:
+        Log::Write(Log::Level::Info, "chendy render Vulkan2!");
         return "Vulkan2";
     case ALXRGraphicsApi::Vulkan:
+        Log::Write(Log::Level::Info, "chendy render Vulkan!");
         return "Vulkan";
     case ALXRGraphicsApi::D3D12:
         return "D3D12";
     case ALXRGraphicsApi::D3D11:
         return "D3D11";
     case ALXRGraphicsApi::OpenGLES:
+        Log::Write(Log::Level::Info, "chendy render OpenGLES!");
         return "OpenGLES";
     case ALXRGraphicsApi::OpenGL:
+        Log::Write(Log::Level::Info, "chendy render OpenGL!");
         return "OpenGL";
     default:
         return "auto";

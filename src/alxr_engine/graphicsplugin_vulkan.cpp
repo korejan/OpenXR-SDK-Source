@@ -3048,8 +3048,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const override {
         // List of supported color swapchain formats.
+        // Log::Write(Log::Level::Info, "chendy SelectColorSwapchainFormat vulkan!");
         constexpr const int64_t SupportedColorSwapchainFormats[] = { VK_FORMAT_B8G8R8A8_SRGB , VK_FORMAT_R8G8B8A8_SRGB,
-                                                                     VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM };
+                                                                    VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM };
 
         auto swapchainFormatIt =
             std::find_first_of(runtimeFormats.begin(), runtimeFormats.end(), std::begin(SupportedColorSwapchainFormats),
@@ -3151,6 +3152,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             .stencil = 0
         }
     };
+
+    using CColorType = std::array<const float, 3>;
+    // constexpr static const CColorType DarkGraySlate{ 0.184313729f, 0.309803933f, 0.309803933f };
+    constexpr static const CColorType DarkGraySlate{ 255.0f, 255.0f, 255.0f };
+    constexpr static const CColorType CClear { 255.0f, 255.0f, 255.0f };
+
     constexpr static const std::array<const ClearValueT, 4> ConstClearValues{
         OpaqueClear {
             VkClearValue {.color {.float32 = { DarkGraySlate[0], DarkGraySlate[1], DarkGraySlate[2], 1.0f}}},

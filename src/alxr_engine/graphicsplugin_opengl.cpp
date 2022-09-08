@@ -223,6 +223,8 @@ struct OpenGLGraphicsPlugin : public IGraphicsPlugin {
 
     int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const override {
         // List of supported color swapchain formats.
+        
+        Log::Write(Log::Level::Info, "chendy SelectColorSwapchainFormat opengl!");
         constexpr int64_t SupportedColorSwapchainFormats[] = {
             GL_RGB10_A2,
             GL_RGBA16F,
@@ -292,12 +294,9 @@ struct OpenGLGraphicsPlugin : public IGraphicsPlugin {
         return depthTexture;
     }
 
-    void RenderView
-    (
-        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-        const std::int64_t swapchainFormat, const PassthroughMode /*newMode*/,
-        const std::vector<Cube>& cubes
-    ) override {
+    void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+                    const std::int64_t swapchainFormat, const PassthroughMode /*newMode*/,
+                    const std::vector<Cube>& cubes) override {
         CHECK(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
         UNUSED_PARM(swapchainFormat);                    // Not used in this function for now.
 
@@ -362,9 +361,7 @@ struct OpenGLGraphicsPlugin : public IGraphicsPlugin {
 
     uint32_t GetSupportedSwapchainSampleCount(const XrViewConfigurationView&) override { return 1; }
 
-    void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
-        m_clearColorIndex = (newMode - 1);
-    }
+    void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) { m_clearColorIndex = (newMode - 1); }
 
    private:
 #ifdef XR_USE_PLATFORM_WIN32
@@ -388,7 +385,7 @@ struct OpenGLGraphicsPlugin : public IGraphicsPlugin {
     GLuint m_cubeIndexBuffer{0};
 
     static_assert(XR_ENVIRONMENT_BLEND_MODE_OPAQUE == 1);
-    std::size_t m_clearColorIndex{ (XR_ENVIRONMENT_BLEND_MODE_OPAQUE - 1) };
+    std::size_t m_clearColorIndex{(XR_ENVIRONMENT_BLEND_MODE_OPAQUE - 1)};
 
     // Map color buffer to associated depth buffer. This map is populated on demand.
     std::map<uint32_t, uint32_t> m_colorToDepthMap;

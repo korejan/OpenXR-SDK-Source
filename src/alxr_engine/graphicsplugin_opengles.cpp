@@ -209,6 +209,7 @@ struct OpenGLESGraphicsPlugin : public IGraphicsPlugin {
 
     int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const override {
         // List of supported color swapchain formats.
+        Log::Write(Log::Level::Info, "chendy SelectColorSwapchainFormat opengles!");
         std::vector<int64_t> supportedColorSwapchainFormats{GL_RGBA8, GL_RGBA8_SNORM};
 
         // In OpenGLES 3.0+, the R, G, and B values after blending are converted into the non-linear
