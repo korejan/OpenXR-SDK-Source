@@ -23,6 +23,7 @@
 #include "interaction_manager.h"
 #include "latency_manager.h"
 #include "decoder_thread.h"
+#include "foveation.h"
 
 #if defined(XR_USE_PLATFORM_WIN32) && defined(XR_EXPORT_HIGH_PERF_GPU_SELECTION_SYMBOLS)
 #pragma message("Enabling Symbols to select high-perf GPUs first")
@@ -225,6 +226,11 @@ void alxr_set_stream_config(const ALXRStreamConfig config)
         std::scoped_lock lk(gRenderMutex);
         programPtr->SetRenderMode(IOpenXrProgram::RenderMode::Lobby);
         graphicsPtr->ClearVideoTextures();
+        
+        ALXR::FoveatedDecodeParams fdParams{};
+        if (rc.enableFoveation)
+            fdParams = ALXR::MakeFoveatedDecodeParams(rc);
+        graphicsPtr->SetFoveatedDecode(rc.enableFoveation ? &fdParams : nullptr);
         programPtr->CreateSwapchains(rc.eyeWidth, rc.eyeHeight);
     }
 

@@ -54,6 +54,7 @@
 #include <readerwritercircularbuffer.h>
 #include "concurrent_queue.h"
 #include "timing.h"
+#include "foveation.h"
 
 namespace {
 
@@ -693,6 +694,7 @@ struct ShaderProgram {
         const VkShaderModuleCreateInfo modInfo{
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = nullptr,
+            .flags = 0,
             .codeSize = code.size() * sizeof(code[0]),
             .pCode = &code[0],
         };
@@ -1881,27 +1883,32 @@ struct PipelineLayout {
         };
         CHECK_VKCMD(vkCreateSampler(m_vkDevice, &samplerInfo, nullptr, &textureSampler));
         
-        const VkDescriptorSetLayoutBinding samplerLayoutBinding {
-            .binding = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1,            
-            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pImmutableSamplers = &textureSampler,
+        const std::array<const VkDescriptorSetLayoutBinding, 1> layoutBindings {
+            VkDescriptorSetLayoutBinding {
+                .binding = 0,
+                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .pImmutableSamplers = &textureSampler,
+            }
         };
         const VkDescriptorSetLayoutCreateInfo layoutInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
-            .bindingCount = 1,
-            .pBindings = &samplerLayoutBinding
+            .bindingCount = (std::uint32_t)layoutBindings.size(),
+            .pBindings = layoutBindings.data()
         };
         CHECK_VKCMD(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout));
 
+        static_assert(sizeof(MultiViewProjectionUniform) <= 128);
+        static_assert(sizeof(ViewProjectionUniform) <= 128);
         // MVP matrix is a push_constant
         const VkPushConstantRange pcr {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            .offset = 0,            
+            .offset = 0,
             .size = (std::uint32_t)(isMultiview ? sizeof(MultiViewProjectionUniform) : sizeof(ViewProjectionUniform)),
         };
+        CHECK(pcr.size <= 128);
         const VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
@@ -2926,6 +2933,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     virtual void* GetD3D11VADeviceContext() { return nullptr; }//return m_d3d11vaDeviceCtx.Get(); }
 #endif
 
+    enum /*class*/ VideoFragShaderType : std::size_t {
+        Normal,
+        FoveatedDecode,
+        TypeCount
+    };
+
     void InitializeVideoResources() 
     {
         InitializeD3D11VA();
@@ -2937,46 +2950,85 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         InitCuda();
 #endif
 
-        const CodeBuffer plainVideoVShaderSPIRV = SPV_PREFIX
-#include "video_vert.spv"
-        SPV_SUFFIX;
+        using CodeBufferList = std::array<CodeBuffer, size_t(PassthroughMode::TypeCount)>;
+        using CodeBufferMap  = std::array<CodeBufferList, VideoFragShaderType::TypeCount>;
 
-        const CodeBuffer multivewVideoVShaderSPIRV = SPV_PREFIX
-#include "multiviewVideo_vert.spv"
-        SPV_SUFFIX;
-
-        const auto& videoVShaderSPIRV = IsMultiViewEnabled() ? multivewVideoVShaderSPIRV : plainVideoVShaderSPIRV;
-        {
-            const CodeBuffer videoFShaderSPIRV = SPV_PREFIX
-#include "video_frag.spv"
-            SPV_SUFFIX;
-            m_videoShader[0].Init(m_vkDevice);
-            m_videoShader[0].LoadVertexShader(videoVShaderSPIRV);
-            m_videoShader[0].LoadFragmentShader(videoFShaderSPIRV);
+        CodeBuffer vertexShader;
+        CodeBufferMap fragShaders;
+        if (IsMultiViewEnabled()) {
+            vertexShader =
+                SPV_PREFIX
+                    #include "shaders/multiview/videoStream_vert.spv"
+                SPV_SUFFIX;
+            fragShaders[VideoFragShaderType::Normal] = {{
+                SPV_PREFIX
+                    #include "shaders/multiview/videoStream_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/multiview/passthroughBlend_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/multiview/passthroughMask_frag.spv"
+                SPV_SUFFIX
+            } };
+            fragShaders[VideoFragShaderType::FoveatedDecode] = {{
+                SPV_PREFIX
+                    #include "shaders/fovDecode/multiview/videoStream_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/fovDecode/multiview/passthroughBlend_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/fovDecode/multiview/passthroughMask_frag.spv"
+                SPV_SUFFIX
+            }};
         }
-        {
-            const CodeBuffer videoLinearSRGBFShaderSPIRV = SPV_PREFIX
-#include "videoLinearSRGB_frag.spv"
-            SPV_SUFFIX;
-            const CodeBuffer passthroughBlendSPIRV = SPV_PREFIX
-#include "passthroughBlend_frag.spv"
-            SPV_SUFFIX;
-            const CodeBuffer passthroughMaskSPIRV = SPV_PREFIX
-#include "passthroughMask_frag.spv"
-            SPV_SUFFIX;
+        else {
+            vertexShader =
+                SPV_PREFIX
+                    #include "shaders/videoStream_vert.spv"
+                SPV_SUFFIX;
+            fragShaders[VideoFragShaderType::Normal] = {{
+                SPV_PREFIX
+                    #include "shaders/videoStream_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/passthroughBlend_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/passthroughMask_frag.spv"
+                SPV_SUFFIX
+            }};
+            fragShaders[VideoFragShaderType::FoveatedDecode] = { {
+                SPV_PREFIX
+                    #include "shaders/fovDecode/videoStream_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/fovDecode/passthroughBlend_frag.spv"
+                SPV_SUFFIX,
+                SPV_PREFIX
+                    #include "shaders/fovDecode/passthroughMask_frag.spv"
+                SPV_SUFFIX
+            }};
+        }
 
-            std::size_t shaderIndex = 1;
-            for (const auto fragShaderPtr :
-                { &videoLinearSRGBFShaderSPIRV,
-                  &passthroughBlendSPIRV,
-                  &passthroughMaskSPIRV })
-            {
-                auto& vidShader = m_videoShader[shaderIndex++];
+        for (const auto shaderType : { VideoFragShaderType::Normal,
+                                       VideoFragShaderType::FoveatedDecode }) {
+            
+            const auto& fragList = fragShaders[shaderType];
+            auto& vsList = m_videoShaders[shaderType];
+            assert(fragList.size() == vsList.size());
+
+            for (std::size_t index = 0; index < fragList.size(); ++index) {
+                const auto& fragShader = fragList[index];
+                CHECK(fragShader.size() > 0);
+                auto& vidShader = vsList[index];
                 vidShader.Init(m_vkDevice);
-                vidShader.LoadVertexShader(videoVShaderSPIRV);
-                vidShader.LoadFragmentShader(*fragShaderPtr);
+                vidShader.LoadVertexShader(vertexShader);
+                vidShader.LoadFragmentShader(fragShader);
             }
         }
+
         if (!m_videoCpyCmdBuffer.Init(m_vkDevice, m_queueFamilyIndex)) THROW("Failed to create command buffer");
 
         m_quadBuffer.Init(m_vkDevice, &m_memAllocator,
@@ -2997,20 +3049,29 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         auto fragmentSPIRV = CompileGlslShader("fragment", shaderc_glsl_default_fragment_shader, FragmentShaderGlsl);
 #else
 
-        const CodeBuffer plainVertexSPIRV = SPV_PREFIX
-#include "vert.spv"
-            SPV_SUFFIX;
-
-        const CodeBuffer mulviewVertexSPIRV = SPV_PREFIX
-#include "multivew_vert.spv"
-            SPV_SUFFIX;
-
-        const CodeBuffer fragmentSPIRV = SPV_PREFIX
-#include "frag.spv"
-            SPV_SUFFIX;
+        CodeBuffer vertexSPIRV, fragmentSPIRV;
+        if (IsMultiViewEnabled()) {
+            vertexSPIRV =
+                SPV_PREFIX
+                    #include "shaders/multiview/lobby_vert.spv"
+                SPV_SUFFIX;            
+            fragmentSPIRV =
+                SPV_PREFIX
+                    #include "shaders/multiview/lobby_frag.spv"
+                SPV_SUFFIX;
+        }
+        else {
+            vertexSPIRV =
+                SPV_PREFIX
+                    #include "shaders/lobby_vert.spv"
+                SPV_SUFFIX;            
+            fragmentSPIRV =
+                SPV_PREFIX
+                    #include "shaders/lobby_frag.spv"
+                SPV_SUFFIX;
+        }
 #endif
 
-        const auto& vertexSPIRV = IsMultiViewEnabled() ? mulviewVertexSPIRV : plainVertexSPIRV;
         if (vertexSPIRV.empty()) THROW("Failed to compile vertex shader");
         if (fragmentSPIRV.empty()) THROW("Failed to compile fragment shader");
 
@@ -3412,10 +3473,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             return;
         const std::uint32_t swapChainCount = static_cast<uint32_t>(m_swapchainImageContexts.back().swapchainImages.size());
         
-        const std::array<const VkDescriptorPoolSize, 1> poolSizes{ VkDescriptorPoolSize {
-            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = swapChainCount,
-        }};
+        const std::array<const VkDescriptorPoolSize, 1> poolSizes{
+            VkDescriptorPoolSize {
+                .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                .descriptorCount = swapChainCount,
+            }
+        };
         const VkDescriptorPoolCreateInfo poolInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .pNext = nullptr,
@@ -3438,25 +3501,91 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         CHECK_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, m_descriptorSets.data()));
     }
 
+    struct alignas(16) SpecializationData {
+        ALXR::FoveatedDecodeParams fdParams;
+        VkBool32 enableSRGBLinearize;
+    };
+    using SpecializationMap = std::vector<VkSpecializationMapEntry>;
+    SpecializationMap MakeSpecializationMap(const bool enableFDParams) const
+    {
+        using SDType = SpecializationData;
+        static_assert(std::is_standard_layout<SDType>::value);
+        constexpr static const std::array<std::uint32_t, 9> MemberOffsets {
+            offsetof(SDType, fdParams.eyeSizeRatio.x),
+            offsetof(SDType, fdParams.eyeSizeRatio.y),
+            offsetof(SDType, fdParams.centerSize.x),
+            offsetof(SDType, fdParams.centerSize.y),
+            offsetof(SDType, fdParams.centerShift.x),
+            offsetof(SDType, fdParams.centerShift.y),
+            offsetof(SDType, fdParams.edgeRatio.x),
+            offsetof(SDType, fdParams.edgeRatio.y),
+            offsetof(SDType, enableSRGBLinearize)
+        };
+        const std::size_t mapCount = enableFDParams ? MemberOffsets.size() : 1;
+        SpecializationMap specializationEMap{};
+        specializationEMap.reserve(mapCount);
+        if (enableFDParams) {
+            for (std::uint32_t const_id = 0; const_id < (MemberOffsets.size()-1); ++const_id) {
+                specializationEMap.push_back({
+                    .constantID = const_id,
+                    .offset = MemberOffsets[const_id],
+                    .size = sizeof(float)
+                });
+            }
+        }
+        const std::uint32_t constID = static_cast<std::uint32_t>(MemberOffsets.size() - 1);
+        specializationEMap.push_back({
+            .constantID = constID,
+            .offset = MemberOffsets[constID],
+            .size = sizeof(VkBool32)
+        });
+        return specializationEMap;
+    }
+
     void CreateVideoStreamPipeline(const VkSamplerYcbcrConversionCreateInfo& conversionInfo)
     {
         //ClearVideoTextures();
         /////////////////////////
         assert(m_videoStreamLayout.IsNull());
         m_videoStreamLayout.CreateVideoStreamLayout(conversionInfo, m_vkDevice, m_vkInstance, m_isMultiViewSupported);
+                
+        const auto fovDecodeParamPtr = m_fovDecodeParams;
+        const SpecializationData specializationConst {
+            .fdParams = fovDecodeParamPtr ? *fovDecodeParamPtr : ALXR::FoveatedDecodeParams{},
+            .enableSRGBLinearize = m_enableSRGBLinearize
+        };
+        const auto specializationMap = MakeSpecializationMap(fovDecodeParamPtr != nullptr);
+        assert(!specializationMap.empty());
+        const VkSpecializationInfo speicalizationInfo{
+            .mapEntryCount = (std::uint32_t)specializationMap.size(),
+            .pMapEntries = specializationMap.data(),
+            .dataSize = sizeof(specializationConst),
+            .pData = &specializationConst
+        };
+
+        const auto shaderType = fovDecodeParamPtr ?
+            VideoFragShaderType::FoveatedDecode :
+            VideoFragShaderType::Normal;
+
         CHECK(m_swapchainImageContexts.size() > 0);
         const auto& swapChainInfo = m_swapchainImageContexts.back();
         std::size_t pipelineIdx = 0;
-        for (const std::size_t shaderIdx : { m_videoShaderIndex, size_t(2), size_t(3) }) {
+        auto& shaderList = m_videoShaders[shaderType];
+        assert(shaderList.size() <= m_videoStreamPipelines.size());
+        for (auto& videoShader : shaderList) {
+            auto& fragShaderInfo = videoShader.shaderInfo[1];
+            fragShaderInfo.pSpecializationInfo = &speicalizationInfo;
             m_videoStreamPipelines[pipelineIdx++].Create
             (
                 m_vkDevice,
                 swapChainInfo.size,
                 m_videoStreamLayout,
                 swapChainInfo.rp,
-                m_videoShader[shaderIdx],
+                videoShader,
                 m_quadBuffer
             );
+            // null-out pSpecializationInfo as it refers to local stack vars.
+            fragShaderInfo.pSpecializationInfo = nullptr;
         }
         CreateImageDescriptorSetLayouts();
     }
@@ -3485,7 +3614,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     }
 
     virtual void SetEnableLinearizeRGB(const bool enable) override {
-        m_videoShaderIndex = enable ? 1 : 0;
+        m_enableSRGBLinearize = enable;
+    }
+
+    virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* fovDecParm) override {
+        m_fovDecodeParams = fovDecParm ?
+            std::make_shared<ALXR::FoveatedDecodeParams>(*fovDecParm) : nullptr;
     }
 
     virtual void ClearVideoTextures() override
@@ -4093,9 +4227,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
             MultiViewProjectionUniform mvp1;
             XrMatrix4x4f_CreateIdentity(&mvp1.mvp[0]);
-            XrMatrix4x4f_CreateIdentity(&mvp1.mvp[1]);
-            
+            XrMatrix4x4f_CreateIdentity(&mvp1.mvp[1]);            
             vkCmdPushConstants(m_cmdBuffer.buf, m_videoStreamLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MultiViewProjectionUniform), &mvp1);
+
             vkCmdDrawIndexed(m_cmdBuffer.buf, m_quadBuffer.count.idx, 1, 0, 0, 0);
 
             vkCmdEndRenderPass(m_cmdBuffer.buf);
@@ -4206,12 +4340,19 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     std::vector<VkDescriptorSet> m_descriptorSets{};
 
     CmdBuffer m_videoCpyCmdBuffer{};
-    std::array<ShaderProgram, 4> m_videoShader{};
+    
+    using VideoShaderList = std::array<ShaderProgram, size_t(PassthroughMode::TypeCount)>;
+    using VideoShaderMap  = std::array<VideoShaderList, size_t(VideoFragShaderType::TypeCount)>;
+    VideoShaderMap m_videoShaders {};
+    
     VertexBuffer<Geometry::QuadVertex> m_quadBuffer{};
     PipelineLayout m_videoStreamLayout{};
     using PipelineList = std::array<Pipeline, size_t(PassthroughMode::TypeCount)>;
     PipelineList m_videoStreamPipelines{};
-    std::size_t  m_videoShaderIndex{ 1 };
+    bool m_enableSRGBLinearize = true;
+
+    using FoveatedDecodeParamsPtr = std::shared_ptr<ALXR::FoveatedDecodeParams>;
+    FoveatedDecodeParamsPtr m_fovDecodeParams{};
 
     constexpr static const std::size_t VideoTexCount = 2;
 
@@ -4356,18 +4497,20 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
                 .imageView = vidTexture.imageView,
                 .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             };
-            const std::array<VkWriteDescriptorSet, 1> descriptorWrites{ VkWriteDescriptorSet {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext = nullptr,
-                .dstSet = m_descriptorSets[i],
-                .dstBinding = 0,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                
-                .pImageInfo = &imageInfo,
-                .pBufferInfo = nullptr,
-                .pTexelBufferView = nullptr
-            }};
+            const std::array<VkWriteDescriptorSet, 1> descriptorWrites{
+                VkWriteDescriptorSet {
+                    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                    .pNext = nullptr,
+                    .dstSet = m_descriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,                
+                    .pImageInfo = &imageInfo,
+                    .pBufferInfo = nullptr,
+                    .pTexelBufferView = nullptr
+                }
+            };
             vkUpdateDescriptorSets(m_vkDevice, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
         }
     }

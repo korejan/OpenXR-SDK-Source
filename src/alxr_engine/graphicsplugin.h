@@ -8,6 +8,10 @@
 #undef None
 #endif
 
+namespace ALXR {
+    struct FoveatedDecodeParams;
+}
+
 struct Cube {
     XrPosef Pose;
     XrVector3f Scale;
@@ -144,6 +148,8 @@ struct IGraphicsPlugin {
     virtual std::uint64_t GetVideoFrameIndex() const { return std::uint64_t(-1); }
 
     virtual void SetEnableLinearizeRGB(const bool /*enable*/) {}
+
+    virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* /*fovDecParm*/) {}
 };
 
 // Create a graphics plugin for the graphics API specified in the options.

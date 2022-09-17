@@ -276,33 +276,81 @@ else()
     endif()
     
     function(compile_glsl run_target_name)
+        if(GLSL_COMPILER)
+            set(GLSL_FLAGS -Werror -O -mfmt=c)
+        else() # ==GLSLANG_VALIDATOR
+            set(GLSL_FLAGS -g0 -V)
+        endif()
+
         set(glsl_output_files "")
         foreach(in_file IN LISTS ARGN)        
             get_filename_component(glsl_file ${in_file} NAME_WE)
             string(REGEX REPLACE "([A-Za-z0-9]*)[_]" "" glsl_stage ${glsl_file})
-            set(out_file ${CMAKE_CURRENT_BINARY_DIR}/${glsl_file}.spv)
+            
+            set(out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${glsl_file}.spv)
+            set(out_file2 ${CMAKE_CURRENT_BINARY_DIR}/shaders/multiview/${glsl_file}.spv)
+            if (glsl_stage STREQUAL "frag")
+                set(out_file3 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/${glsl_file}.spv)
+                set(out_file4 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/multiview/${glsl_file}.spv)
+            endif()
+
             if(GLSL_COMPILER)
                 # Run glslc if we can find it
                 add_custom_command(
                     OUTPUT ${out_file}
-                    COMMAND ${GLSL_COMPILER} -mfmt=c -fshader-stage=${glsl_stage} ${in_file} -o ${out_file}
+                    OUTPUT ${out_file2}
+                    COMMAND ${GLSL_COMPILER} ${GLSL_FLAGS} -fshader-stage=${glsl_stage} ${in_file} -o ${out_file}
+                    COMMAND ${GLSL_COMPILER} ${GLSL_FLAGS} -DENABLE_MULTIVEW_EXT -fshader-stage=${glsl_stage} ${in_file} -o ${out_file2}
                     DEPENDS ${in_file}
                 )
+                if (glsl_stage STREQUAL "frag")
+                    add_custom_command(                        
+                        OUTPUT ${out_file3}
+                        OUTPUT ${out_file4}
+                        COMMAND ${GLSL_COMPILER} ${GLSL_FLAGS} -DENABLE_FOVEATION_DECODE -fshader-stage=${glsl_stage} ${in_file} -o ${out_file3}
+                        COMMAND ${GLSL_COMPILER} ${GLSL_FLAGS} -DENABLE_MULTIVEW_EXT -DENABLE_FOVEATION_DECODE -fshader-stage=${glsl_stage} ${in_file} -o ${out_file4}
+                        DEPENDS ${in_file}
+                        #VERBATIM
+                    )
+                endif()
             elseif(GLSLANG_VALIDATOR)
                 # Run glslangValidator if we can find it
                 add_custom_command(
                     OUTPUT ${out_file}
-                    COMMAND ${GLSLANG_VALIDATOR} -V -S ${glsl_stage} ${in_file} -x -o ${out_file}
+                    OUTPUT ${out_file2}
+                    COMMAND ${GLSLANG_VALIDATOR} ${GLSL_FLAGS} -S ${glsl_stage} ${in_file} -x -o ${out_file}
+                    COMMAND ${GLSLANG_VALIDATOR} ${GLSL_FLAGS} -DENABLE_MULTIVEW_EXT -S ${glsl_stage} ${in_file} -x -o ${out_file2}
                     DEPENDS ${in_file}
                     VERBATIM
                 )
+                if (glsl_stage STREQUAL "frag")
+                    add_custom_command(
+                        OUTPUT ${out_file3}
+                        OUTPUT ${out_file4}
+                        COMMAND ${GLSLANG_VALIDATOR} ${GLSL_FLAGS} -DENABLE_FOVEATION_DECODE -S ${glsl_stage} ${in_file} -x -o ${out_file3}
+                        COMMAND ${GLSLANG_VALIDATOR} ${GLSL_FLAGS} -DENABLE_MULTIVEW_EXT -DENABLE_FOVEATION_DECODE -S ${glsl_stage} ${in_file} -x -o ${out_file4}
+                        DEPENDS ${in_file}
+                        VERBATIM
+                    )
+                endif()
             else()
                 # Use the precompiled .spv files
                 get_filename_component(glsl_src_dir ${in_file} DIRECTORY)
-                set(precompiled_file ${glsl_src_dir}/${glsl_file}.spv)
+                set(precompiled_file ${glsl_src_dir}/precompiled/${glsl_file}.spv)
                 configure_file(${precompiled_file} ${out_file} COPYONLY)
+
+                set(precompiled_file ${glsl_src_dir}/precompiled/multiview/${glsl_file}.spv)
+                configure_file(${precompiled_file} ${out_file2} COPYONLY)
+                
+                if (glsl_stage STREQUAL "frag")
+                    set(precompiled_file ${glsl_src_dir}/precompiled/fovDecode/${glsl_file}.spv)
+                    configure_file(${precompiled_file} ${out_file3} COPYONLY)
+                
+                    set(precompiled_file ${glsl_src_dir}/precompiled/fovDecode/multiview/${glsl_file}.spv)
+                    configure_file(${precompiled_file} ${out_file4} COPYONLY)
+                endif()
             endif()
-            list(APPEND glsl_output_files ${out_file})
+            list(APPEND glsl_output_files ${out_file} ${out_file2} ${out_file3} ${out_file4})
         endforeach()
         add_custom_target(${run_target_name} ALL DEPENDS ${glsl_output_files})
         set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
@@ -331,6 +379,9 @@ if (WIN32 AND MSVC)
                 set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
             elseif(shader_stage STREQUAL "frag")
                 set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
+                #set(ps_out_file2 ${CMAKE_CURRENT_BINARY_DIR}/shaders/yuv3PlaneFmt/${hlsl_file}.cso)
+                #set(ps_out_file3 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/${hlsl_file}.cso)
+                #set(ps_out_file4 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
             else()
                 set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_vert.cso)
                 set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_frag.cso)
@@ -347,7 +398,13 @@ if (WIN32 AND MSVC)
                 elseif(shader_stage STREQUAL "frag")
                     add_custom_command(
                         OUTPUT ${ps_out_file}
+                        #OUTPUT ${ps_out_file2}
+                        #OUTPUT ${ps_out_file3}
+                        #OUTPUT ${ps_out_file4}
                         COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
+                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file2}
+                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file3}
+                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file4}
                         DEPENDS ${in_file}
                         VERBATIM
                     )
@@ -378,7 +435,7 @@ if (WIN32 AND MSVC)
                     configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
                 endif()
             endif()
-            list(APPEND cso_output_files ${vs_out_file} ${ps_out_file})
+            list(APPEND cso_output_files ${vs_out_file} ${ps_out_file})# ${ps_out_file2} ${ps_out_file3} ${ps_out_file4})
         endforeach()
         add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
         set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})

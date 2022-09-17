@@ -1,13 +1,20 @@
-#version 400
+#version 460
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
+#ifdef ENABLE_MULTIVEW_EXT
+    #extension GL_EXT_multiview : enable
+#endif
 
 #pragma vertex
 
 layout (std140, push_constant) uniform buf
 {
+#ifdef ENABLE_MULTIVEW_EXT
+    mat4 mvp[2];
+#else
     mat4 mvp;
     uint ViewID;
+#endif
 } ubuf;
 
 layout (location = 0) in vec3 Position;
@@ -22,10 +29,23 @@ out gl_PerVertex
 void main()
 {
     vec2 ouv = UV;
-    if (ubuf.ViewID > 0) {
+
+    const bool isRightView =
+#ifdef ENABLE_MULTIVEW_EXT
+        gl_ViewIndex > 0;
+#else
+        ubuf.ViewID > 0;
+#endif
+    if (isRightView) {
         ouv.x += 0.5f;
     }
     oUV = ouv;
-    gl_Position = ubuf.mvp * vec4(Position, 1.0);
+
+    gl_Position =
+#ifdef ENABLE_MULTIVEW_EXT
+        ubuf.mvp[gl_ViewIndex] * vec4(Position, 1.0);
+#else
+        ubuf.mvp * vec4(Position, 1.0);
+#endif
     gl_Position.y = -gl_Position.y;
 }
