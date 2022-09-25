@@ -334,7 +334,6 @@ else()
                     )
                 endif()
             else()
-                message(NOTICE "Poopy")
                 # Use the precompiled .spv files
                 get_filename_component(glsl_src_dir ${in_file} DIRECTORY)
                 set(glsl_precompiled_dir ${glsl_src_dir}/precompiled)
