@@ -23,8 +23,7 @@
 #ifdef XR_ENABLE_CUDA_INTEROP
 #include "cuda/d3d11cuda_interop.h"
 #endif
-
-#include "concurrent_queue.h"
+#include "foveation.h"
 
 using namespace Microsoft::WRL;
 using namespace DirectX;
@@ -75,7 +74,7 @@ constexpr inline DXGI_FORMAT GetLumaFormat(const XrPixelFormat yuvFmt) {
     case XrPixelFormat::G8_B8_R8_3PLANE_420:          return DXGI_FORMAT_R8_UNORM;
     case XrPixelFormat::G10X6_B10X6_R10X6_3PLANE_420: return DXGI_FORMAT_R16_UNORM;
     }
-    return GetLumaFormat(MapFormat(yuvFmt));
+    return ALXR::GetLumaFormat(MapFormat(yuvFmt));
 }
 
 constexpr inline DXGI_FORMAT GetChromaFormat(const XrPixelFormat yuvFmt) {
@@ -83,7 +82,7 @@ constexpr inline DXGI_FORMAT GetChromaFormat(const XrPixelFormat yuvFmt) {
     case XrPixelFormat::G8_B8_R8_3PLANE_420:          return DXGI_FORMAT_R8G8_UNORM;
     case XrPixelFormat::G10X6_B10X6_R10X6_3PLANE_420: return DXGI_FORMAT_R16G16_UNORM;
     }
-    return GetChromaFormat(MapFormat(yuvFmt));
+    return ALXR::GetChromaFormat(MapFormat(yuvFmt));
 }
 
 constexpr inline DXGI_FORMAT GetChromaUFormat(const XrPixelFormat yuvFmt) {
@@ -117,15 +116,13 @@ inline bool SetMultithreadProtected(ComPtr<ID3D11Device> device)
 
 struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     
-    enum VideoPShader : std::size_t {
-        Normal = 0,
-        PassthroughBlend,
-        PassthroughMask,
-        Normal3Plane,
-        PassthroughBlend3Plane,
-        PassthroughMask3Plane,
-        TypeCount
+    using VideoPShader = ALXR::VideoPShader;
+
+    struct D3D11ShaderByteCode {
+        const void* data;
+        std::size_t size;
     };
+    using CoreShaders = ALXR::CoreShaders<D3D11ShaderByteCode>;
 
     D3D11GraphicsPlugin(const std::shared_ptr<Options>&, std::shared_ptr<IPlatformPlugin>){};
 
@@ -141,7 +138,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         // Create the D3D11 device for the adapter associated with the system.
         XrGraphicsRequirementsD3D11KHR graphicsRequirements{.type=XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR, .next=nullptr};
         CHECK_XRCMD(pfnGetD3D11GraphicsRequirementsKHR(instance, systemId, &graphicsRequirements));
-        const ComPtr<IDXGIAdapter1> adapter = GetAdapter(graphicsRequirements.adapterLuid);
+        const ComPtr<IDXGIAdapter1> adapter = ALXR::GetAdapter(graphicsRequirements.adapterLuid);
         if (adapter == nullptr) {
             Log::Write(Log::Level::Warning, "Failed to find suitable adaptor, client will fallback to an unknown device type.");
         }
@@ -160,6 +157,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         InitializeD3D11VADevice(adapter, featureLevels);
         
         InitializeResources();
+        CHECK(m_coreShaders.IsValid());
 
         m_graphicsBinding.device = m_device.Get();
 
@@ -192,24 +190,18 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         CHECK_HRCMD(m_device->CreateDeferredContext(0, m_uploadContext.ReleaseAndGetAddressOf()));
         CHECK(m_uploadContext != nullptr);
 
-        const auto videoShaderStr = MakeVideoShaderHlslStr(m_isMultiViewSupported);
-        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(videoShaderStr.c_str(), "MainVS", "vs_5_0");
+        CHECK(m_coreShaders.IsValid());
+        
         CHECK_HRCMD(m_device->CreateVertexShader
         (
-            vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
+            m_coreShaders.videoVS.data(), m_coreShaders.videoVS.size(), nullptr,
             m_videoVertexShader.ReleaseAndGetAddressOf())
         );
 
         std::size_t shaderIndex = 0;
-        for (const auto mainName : { "MainPS",
-                                     "MainBlendPS",
-                                     "MainMaskPS",
-                                     "Main3PlaneFmtPS",
-                                     "MainBlend3PlaneFmtPS",
-                                     "MainMask3PlaneFmtPS" })
+        for (const auto& videoPixelShader : m_coreShaders.videoPSMap[0])
         {
-            const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(videoShaderStr.c_str(), mainName, "ps_5_0");
-            CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes->GetBufferPointer(), pixelShaderBytes->GetBufferSize(), nullptr,
+            CHECK_HRCMD(m_device->CreatePixelShader(videoPixelShader.data(), videoPixelShader.size(), nullptr,
                 m_videoPixelShader[shaderIndex++].ReleaseAndGetAddressOf()));
         }
 
@@ -217,7 +209,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
             {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
         };
-        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)std::size(vertexDesc), vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), &m_quadInputLayout));
+        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)std::size(vertexDesc), m_coreShaders.videoVS.data(), m_coreShaders.videoVS.size(), &m_quadInputLayout));
 
         using namespace Geometry;
 
@@ -250,34 +242,36 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         if (SUCCEEDED(m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options)))) {
             m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
         }
+        
+        const CoreShaders::Path smDir = m_isMultiViewSupported ? "SM5/multivew" : "SM5";
+        m_coreShaders = smDir;
 
-        const auto& shaderStr = m_isMultiViewSupported ? MultiViewShaderHlsl : ShaderHlsl;
-        const ComPtr<ID3DBlob> vertexShaderBytes = CompileShader(shaderStr, "MainVS", "vs_5_0");
-        CHECK_HRCMD(m_device->CreateVertexShader(vertexShaderBytes->GetBufferPointer(), vertexShaderBytes->GetBufferSize(), nullptr,
-                                                 m_vertexShader.ReleaseAndGetAddressOf()));
+        const auto& lobbyVS = m_coreShaders.lobbyVS;
+        CHECK_HRCMD(m_device->CreateVertexShader(lobbyVS.data(), lobbyVS.size(), nullptr, m_vertexShader.ReleaseAndGetAddressOf()));
 
-        const ComPtr<ID3DBlob> pixelShaderBytes = CompileShader(shaderStr, "MainPS", "ps_5_0");
-        CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes->GetBufferPointer(), pixelShaderBytes->GetBufferSize(), nullptr,
+        const auto& lobbyPS = m_coreShaders.lobbyPS;
+        CHECK_HRCMD(m_device->CreatePixelShader(lobbyPS.data(), lobbyPS.size(), nullptr,
                                                 m_pixelShader.ReleaseAndGetAddressOf()));
 
         const D3D11_INPUT_ELEMENT_DESC vertexDesc[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
             {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0},
         };
+        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)std::size(vertexDesc), lobbyVS.data(), lobbyVS.size(), &m_inputLayout));
 
-        CHECK_HRCMD(m_device->CreateInputLayout(vertexDesc, (UINT)ArraySize(vertexDesc), vertexShaderBytes->GetBufferPointer(),
-                                                vertexShaderBytes->GetBufferSize(), &m_inputLayout));
-
-        const CD3D11_BUFFER_DESC modelConstantBufferDesc(sizeof(ModelConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
+        const CD3D11_BUFFER_DESC modelConstantBufferDesc(sizeof(ALXR::ModelConstantBuffer), D3D11_BIND_CONSTANT_BUFFER);
         CHECK_HRCMD(m_device->CreateBuffer(&modelConstantBufferDesc, nullptr, m_modelCBuffer.ReleaseAndGetAddressOf()));
 
         const CD3D11_BUFFER_DESC viewProjectionConstantBufferDesc
         (
-            m_isMultiViewSupported ? sizeof(MultiViewProjectionConstantBuffer) : sizeof(ViewProjectionConstantBuffer),
+            m_isMultiViewSupported ? sizeof(ALXR::MultiViewProjectionConstantBuffer) : sizeof(ALXR::ViewProjectionConstantBuffer),
             D3D11_BIND_CONSTANT_BUFFER
         );
         CHECK_HRCMD(
             m_device->CreateBuffer(&viewProjectionConstantBufferDesc, nullptr, m_viewProjectionCBuffer.ReleaseAndGetAddressOf()));
+
+        const CD3D11_BUFFER_DESC fovDecodeBufferDesc(sizeof(ALXR::FoveatedDecodeParams), D3D11_BIND_CONSTANT_BUFFER);
+        CHECK_HRCMD(m_device->CreateBuffer(&fovDecodeBufferDesc, nullptr, m_fovDecodeCBuffer.ReleaseAndGetAddressOf()));
 
         const D3D11_SUBRESOURCE_DATA vertexBufferData{Geometry::c_cubeVertices};
         const CD3D11_BUFFER_DESC vertexBufferDesc(sizeof(Geometry::c_cubeVertices), D3D11_BIND_VERTEX_BUFFER);
@@ -409,10 +403,10 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
     static inline void MakeViewProjMatrix(DirectX::XMFLOAT4X4& viewProj, const XrCompositionLayerProjectionView& layerView)
     {
-        const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
+        const XMMATRIX spaceToView = XMMatrixInverse(nullptr, ALXR::LoadXrPose(layerView.pose));
         XrMatrix4x4f projectionMatrix;
         XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
-        XMStoreFloat4x4(&viewProj, XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+        XMStoreFloat4x4(&viewProj, XMMatrixTranspose(spaceToView * ALXR::LoadXrMatrix(projectionMatrix)));
     }
 
     virtual void RenderMultiView
@@ -425,7 +419,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     {
         RenderMultiViewImpl(layerViews[0], swapchainImage, swapchainFormat, ALXR::ClearColors[ClearColorIndex(mode)], [&]()
         {
-            MultiViewProjectionConstantBuffer viewProjections;
+            ALXR::MultiViewProjectionConstantBuffer viewProjections;
             for (std::uint32_t viewIndex = 0; viewIndex < 2; ++viewIndex) {
                 MakeViewProjMatrix(viewProjections.ViewProjection[viewIndex], layerViews[viewIndex]);
             }
@@ -448,9 +442,9 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             // Render each cube
             for (const Cube& cube : cubes) {
                 // Compute and update the model transform.
-                ModelConstantBuffer model;
+                ALXR::ModelConstantBuffer model;
                 XMStoreFloat4x4(&model.Model,
-                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * LoadXrPose(cube.Pose)));
+                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * ALXR::LoadXrPose(cube.Pose)));
                 m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
 
                 // Draw the cube.
@@ -473,13 +467,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             const auto& videoTex = m_videoTextures[currentTextureIdx];
 
             // Set shaders and constant buffers.
-            MultiViewProjectionConstantBuffer viewProjections;
+            ALXR::MultiViewProjectionConstantBuffer viewProjections;
             for (std::size_t vindex = 0; vindex < 2; ++vindex) {
                 XMStoreFloat4x4(&viewProjections.ViewProjection[vindex], XMMatrixIdentity());
             }
             m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjections, 0, 0);
 
-            ModelConstantBuffer model;
+            ALXR::ModelConstantBuffer model;
             XMStoreFloat4x4(&model.Model, XMMatrixIdentity());
             m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
 
@@ -487,6 +481,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
             m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
             m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
+
+            if (const auto fovDecParmPtr = m_fovDecodeParams) {
+                alignas(16) const ALXR::FoveatedDecodeParams fdParam = *fovDecParmPtr;
+                m_deviceContext->UpdateSubresource(m_fovDecodeCBuffer.Get(), 0, nullptr, &fdParam, 0, 0);
+                ID3D11Buffer* const psConstantBuffers[] = { m_fovDecodeCBuffer.Get() };
+                m_deviceContext->PSSetConstantBuffers(2, (UINT)std::size(psConstantBuffers), psConstantBuffers);
+            }            
             m_deviceContext->PSSetShader(m_videoPixelShader[VideoShaderIndex(is3PlaneFormat, newMode)].Get(), nullptr, 0);
 
             const std::array<ID3D11ShaderResourceView*, 3> srvs{
@@ -541,7 +542,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         m_deviceContext->ClearDepthStencilView(depthStencilView.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 
         ID3D11RenderTargetView* renderTargets[] = {renderTargetView.Get()};
-        m_deviceContext->OMSetRenderTargets((UINT)ArraySize(renderTargets), renderTargets, depthStencilView.Get());
+        m_deviceContext->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, depthStencilView.Get());
 
         renderFn();
     }
@@ -562,12 +563,12 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         RenderViewImpl(layerView, swapchainImage, swapchainFormat, ALXR::ClearColors[ClearColorIndex(mode)], [&]()
         {
             // Set shaders and constant buffers.
-            ViewProjectionConstantBuffer viewProjection;
+            ALXR::ViewProjectionConstantBuffer viewProjection;
             MakeViewProjMatrix(viewProjection.ViewProjection, layerView);
             m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
 
             ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
-            m_deviceContext->VSSetConstantBuffers(0, (UINT)ArraySize(constantBuffers), constantBuffers);
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
             m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
             m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
@@ -575,7 +576,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             constexpr static const UINT strides[] = { sizeof(Geometry::Vertex) };
             constexpr static const UINT offsets[] = { 0 };
             ID3D11Buffer* vertexBuffers[] = { m_cubeVertexBuffer.Get() };
-            m_deviceContext->IASetVertexBuffers(0, (UINT)ArraySize(vertexBuffers), vertexBuffers, strides, offsets);
+            m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
             m_deviceContext->IASetIndexBuffer(m_cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
             m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             m_deviceContext->IASetInputLayout(m_inputLayout.Get());
@@ -583,13 +584,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             // Render each cube
             for (const Cube& cube : cubes) {
                 // Compute and update the model transform.
-                ModelConstantBuffer model;
+                ALXR::ModelConstantBuffer model;
                 XMStoreFloat4x4(&model.Model,
-                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * LoadXrPose(cube.Pose)));
+                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * ALXR::LoadXrPose(cube.Pose)));
                 m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
 
                 // Draw the cube.
-                m_deviceContext->DrawIndexed((UINT)ArraySize(Geometry::c_cubeIndices), 0, 0);
+                m_deviceContext->DrawIndexed((UINT)std::size(Geometry::c_cubeIndices), 0, 0);
             }
         });
     }
@@ -659,7 +660,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             (
                 newTex.Get(),
                 D3D11_SRV_DIMENSION_TEXTURE2D,
-                GetLumaFormat(descDepth.Format)
+                ALXR::GetLumaFormat(descDepth.Format)
             );
             CHECK_HRCMD(m_device->CreateShaderResourceView(newTex.Get(), &lumaPlaneSRVDesc, vidTex.lumaSRV.ReleaseAndGetAddressOf()));
 
@@ -667,7 +668,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             (
                 newTex.Get(),
                 D3D11_SRV_DIMENSION_TEXTURE2D,
-                GetChromaFormat(descDepth.Format)
+                ALXR::GetChromaFormat(descDepth.Format)
             );
             CHECK_HRCMD(m_device->CreateShaderResourceView(newTex.Get(), &chromaPlaneSRVDesc, vidTex.chromaSRV.ReleaseAndGetAddressOf()));
         }
@@ -1009,19 +1010,26 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             const auto& videoTex = m_videoTextures[currentTextureIdx];
 
             // Set shaders and constant buffers.
-            ViewProjectionConstantBuffer viewProjection;
+            ALXR::ViewProjectionConstantBuffer viewProjection;
             viewProjection.ViewID = viewID;
-            XMStoreFloat4x4(&viewProjection.ViewProjection, XMMatrixIdentity()); // XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+            XMStoreFloat4x4(&viewProjection.ViewProjection, XMMatrixIdentity());
             m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
 
-            ModelConstantBuffer model;
-            XMStoreFloat4x4(&model.Model, XMMatrixIdentity());//XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * LoadXrPose(cube.Pose)));
+            ALXR::ModelConstantBuffer model;
+            XMStoreFloat4x4(&model.Model, XMMatrixIdentity());
             m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
 
             const bool is3PlaneFormat = videoTex.chromaVSRV != nullptr;
             ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
-            m_deviceContext->VSSetConstantBuffers(0, (UINT)ArraySize(constantBuffers), constantBuffers);
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
             m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
+
+            if (const auto fovDecParmPtr = m_fovDecodeParams) {
+                alignas(16) const ALXR::FoveatedDecodeParams fdParam = *fovDecParmPtr;
+                m_deviceContext->UpdateSubresource(m_fovDecodeCBuffer.Get(), 0, nullptr, &fdParam, 0, 0);
+                ID3D11Buffer* const psConstantBuffers[] = { m_fovDecodeCBuffer.Get() };
+                m_deviceContext->PSSetConstantBuffers(2, (UINT)std::size(psConstantBuffers), psConstantBuffers);
+            }
             m_deviceContext->PSSetShader(m_videoPixelShader[VideoShaderIndex(is3PlaneFormat, newMode)].Get(), nullptr, 0);
 
             const std::array<ID3D11ShaderResourceView*, 3> srvs {
@@ -1040,7 +1048,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             constexpr static const UINT strides[] = { sizeof(QuadVertex) };
             constexpr static const UINT offsets[] = { 0 };
             ID3D11Buffer* const vertexBuffers[] = { m_quadVertexBuffer.Get() };
-            m_deviceContext->IASetVertexBuffers(0, (UINT)ArraySize(vertexBuffers), vertexBuffers, strides, offsets);
+            m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
             m_deviceContext->IASetIndexBuffer(m_quadIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
             m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             m_deviceContext->IASetInputLayout(m_quadInputLayout.Get());
@@ -1057,6 +1065,28 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         return m_isMultiViewSupported;
     }
 
+    virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* newFovDecParmPtr) override {
+        CHECK(m_device != nullptr);
+        const auto fovDecodeParams = m_fovDecodeParams;
+        const bool changePShaders  = (fovDecodeParams == nullptr && newFovDecParmPtr != nullptr) ||
+                                     (fovDecodeParams != nullptr && newFovDecParmPtr == nullptr);
+        if (changePShaders) {
+            CHECK(m_coreShaders.IsValid());
+            decltype(m_videoPixelShader) newVideoPixelShaders{};
+            const auto& pixelShaderByteList = m_coreShaders.videoPSMap[newFovDecParmPtr ? 1 : 0];
+            assert(pixelShaderByteList.size() == newVideoPixelShaders.size());
+            std::size_t shaderIndex = 0;
+            for (const auto& pixelShaderBytes : pixelShaderByteList)
+            {
+                CHECK_HRCMD(m_device->CreatePixelShader(pixelShaderBytes.data(), pixelShaderBytes.size(), nullptr,
+                    newVideoPixelShaders[shaderIndex++].ReleaseAndGetAddressOf()));
+            }
+            m_videoPixelShader = newVideoPixelShaders;
+        }
+        m_fovDecodeParams = newFovDecParmPtr ?
+            std::make_shared<ALXR::FoveatedDecodeParams>(*newFovDecParmPtr) : nullptr;
+    }
+
 #include "cuda/d3d11cuda_interop.inl"
 
    private:
@@ -1065,15 +1095,19 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     LUID                        m_d3d11DeviceLUID {};
     XrGraphicsBindingD3D11KHR m_graphicsBinding{.type=XR_TYPE_GRAPHICS_BINDING_D3D11_KHR, .next=nullptr};
     std::list<std::vector<XrSwapchainImageD3D11KHR>> m_swapchainImageBuffers;
+    CoreShaders m_coreShaders{};
     ComPtr<ID3D11VertexShader> m_vertexShader;
     ComPtr<ID3D11PixelShader> m_pixelShader;
     ComPtr<ID3D11InputLayout> m_inputLayout;
     ComPtr<ID3D11Buffer> m_modelCBuffer;
     ComPtr<ID3D11Buffer> m_viewProjectionCBuffer;
+    ComPtr<ID3D11Buffer> m_fovDecodeCBuffer;
     ComPtr<ID3D11Buffer> m_cubeVertexBuffer;
     ComPtr<ID3D11Buffer> m_cubeIndexBuffer;
 //video textures /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //ComPtr<ID3D11DeviceContext> m_decoderDeviceContext;
+    using FoveatedDecodeParamsPtr = std::shared_ptr<ALXR::FoveatedDecodeParams>;
+    FoveatedDecodeParamsPtr m_fovDecodeParams{};
+
     ComPtr<ID3D11DeviceContext> m_uploadContext;
     
     ComPtr<ID3D11SamplerState> m_lumaSampler;

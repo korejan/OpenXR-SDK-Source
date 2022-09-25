@@ -22,7 +22,7 @@
 #include "d3dx12.h"
 #include "d3d_common.h"
 #include "d3d_fence_event.h"
-
+#include "foveation.h"
 #include "concurrent_queue.h"
 #include "cuda/WindowsSecurityAttributes.h"
 #ifdef XR_ENABLE_CUDA_INTEROP
@@ -63,7 +63,7 @@ constexpr inline DXGI_FORMAT GetLumaFormat(const XrPixelFormat yuvFmt) {
     case XrPixelFormat::G8_B8_R8_3PLANE_420:          return DXGI_FORMAT_R8_UNORM;
     case XrPixelFormat::G10X6_B10X6_R10X6_3PLANE_420: return DXGI_FORMAT_R16_UNORM;
     }
-    return GetLumaFormat(MapFormat(yuvFmt));
+    return ALXR::GetLumaFormat(MapFormat(yuvFmt));
 }
 
 constexpr inline DXGI_FORMAT GetChromaFormat(const XrPixelFormat yuvFmt) {
@@ -71,7 +71,7 @@ constexpr inline DXGI_FORMAT GetChromaFormat(const XrPixelFormat yuvFmt) {
     case XrPixelFormat::G8_B8_R8_3PLANE_420:          return DXGI_FORMAT_R8G8_UNORM;
     case XrPixelFormat::G10X6_B10X6_R10X6_3PLANE_420: return DXGI_FORMAT_R16G16_UNORM;
     }
-    return GetChromaFormat(MapFormat(yuvFmt));
+    return ALXR::GetChromaFormat(MapFormat(yuvFmt));
 }
 
 constexpr inline DXGI_FORMAT GetChromaUFormat(const XrPixelFormat yuvFmt) {
@@ -187,9 +187,15 @@ ComPtr<ID3D12Resource> CreateTextureUploadBuffer
     return textureUploadHeap;
 }
 
-class SwapchainImageContext {
-   public:
-    std::vector<XrSwapchainImageBaseHeader*> Create(ID3D12Device* d3d12Device, uint32_t capacity, const std::uint32_t viewProjbufferSize) {
+struct SwapchainImageContext {
+
+    using FoveatedDecodeParamsPtr = std::shared_ptr<ALXR::FoveatedDecodeParams>;
+
+    std::vector<XrSwapchainImageBaseHeader*> Create
+    (
+        ID3D12Device* d3d12Device, const std::uint32_t capacity, const std::uint32_t viewProjbufferSize,
+        const FoveatedDecodeParamsPtr fdParamPtr = nullptr // don't pass by ref.
+    ) {
         m_d3d12Device = d3d12Device;
 
         m_swapchainImages.resize(capacity, {
@@ -207,6 +213,14 @@ class SwapchainImageContext {
         m_commandAllocator->SetName(L"SwapchainImageCtx_CmdAllocator");
         m_viewProjectionCBuffer = CreateBuffer(m_d3d12Device, viewProjbufferSize, D3D12_HEAP_TYPE_UPLOAD);
         m_viewProjectionCBuffer->SetName(L"SwapchainImageCtx_ViewProjectionCBuffer");
+
+        constexpr const std::uint32_t foveationParamsSize =
+            AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ALXR::FoveatedDecodeParams));
+        m_foveationParamCBuffer = CreateBuffer(m_d3d12Device, foveationParamsSize, D3D12_HEAP_TYPE_UPLOAD);
+        m_foveationParamCBuffer->SetName(L"SwapchainImageCtx_FoveationParamCBuffer");
+        if (fdParamPtr)
+            SetFoveationDecodeData(*fdParamPtr);
+
         return bases;
     }
 
@@ -266,6 +280,25 @@ class SwapchainImageContext {
 
     ID3D12Resource* GetModelCBuffer() const { return m_modelCBuffer.Get(); }
     ID3D12Resource* GetViewProjectionCBuffer() const { return m_viewProjectionCBuffer.Get(); }
+    ID3D12Resource* GetFoveationParamCBuffer() const {
+        assert(m_foveationParamCBuffer != nullptr);
+        return m_foveationParamCBuffer.Get();
+    }
+
+    void SetFoveationDecodeData(const ALXR::FoveatedDecodeParams& fdParams) {
+        if (m_foveationParamCBuffer == nullptr)
+            return;
+        constexpr const std::size_t AlignSize = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
+        const alignas(AlignSize) ALXR::FoveatedDecodeParams fovParams = fdParams;
+        {
+            constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
+            void* data = nullptr;
+            CHECK_HRCMD(m_foveationParamCBuffer->Map(0, &NoReadRange, &data));
+            assert(data != nullptr);
+            std::memcpy(data, &fovParams, sizeof(fovParams));
+            m_foveationParamCBuffer->Unmap(0, nullptr);
+        }
+    }
 
    private:
     ID3D12Device* m_d3d12Device{nullptr};
@@ -275,149 +308,19 @@ class SwapchainImageContext {
     ComPtr<ID3D12Resource> m_depthStencilTexture;
     ComPtr<ID3D12Resource> m_modelCBuffer;
     ComPtr<ID3D12Resource> m_viewProjectionCBuffer;
+    ComPtr<ID3D12Resource> m_foveationParamCBuffer;
     uint64_t m_fenceValue = 0;
 };
 
 struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
-    enum VideoPShader : std::size_t {
-        Normal=0,
-        PassthroughBlend,
-        PassthroughMask,
-        Normal3Plane,
-        PassthroughBlend3Plane,
-        PassthroughMask3Plane,
-        TypeCount
-    };
+    using VideoPShader = ALXR::VideoPShader;
+    using CoreShaders  = ALXR::CoreShaders<D3D12_SHADER_BYTECODE>;
 
-    template < const std::size_t N> 
-    using ShaderByteCodeList = std::array<D3D12_SHADER_BYTECODE, N>;
+    template < const std::size_t N >
+    using ShaderByteCodeList = CoreShaders::ShaderByteCodeSpanList<N>;
 
-    struct CoreShadersSM5 {
-        using VideoPShaderList = std::array<ComPtr<ID3DBlob>, VideoPShader::TypeCount>;
-
-        ComPtr<ID3DBlob> lobbyVS;
-        ComPtr<ID3DBlob> lobbyPS;
-        ComPtr<ID3DBlob> videoVS;
-        VideoPShaderList videoPSList;
-
-        ShaderByteCodeList<2> GetLobbyByteCodes() const {
-            return {
-                D3D12_SHADER_BYTECODE { lobbyVS->GetBufferPointer(), lobbyVS->GetBufferSize() },
-                D3D12_SHADER_BYTECODE { lobbyPS->GetBufferPointer(), lobbyPS->GetBufferSize() }
-            };
-        }
-
-        using VideoByteCodeList = ShaderByteCodeList<VideoPShader::TypeCount + 1>;
-        VideoByteCodeList GetVideoByteCodes() const {
-            VideoByteCodeList ret{ D3D12_SHADER_BYTECODE { videoVS->GetBufferPointer(), videoVS->GetBufferSize() } };
-            for (std::size_t index =0; index < videoPSList.size(); ++index) {
-                const auto ps = videoPSList[index];
-                ret[index+1] = { ps->GetBufferPointer(), ps->GetBufferSize() };
-            }
-            return ret;
-        }
-
-        CoreShadersSM5()
-        : lobbyVS(CompileShader(ShaderHlsl, "MainVS", "vs_5_1")),
-          lobbyPS(CompileShader(ShaderHlsl, "MainPS", "ps_5_1")),
-          videoVS(CompileShader(VideoVShaderHlsl, "MainVS", "vs_5_1"))
-        {
-            const auto videoShaderStr = MakeVideoShaderHlslStr(/*multi-view=*/false);
-            videoPSList = 
-            {
-                CompileShader(videoShaderStr.c_str(), "MainPS", "ps_5_1"),
-                CompileShader(videoShaderStr.c_str(), "MainBlendPS", "ps_5_1"),
-                CompileShader(videoShaderStr.c_str(), "MainMaskPS", "ps_5_1"),
-                CompileShader(videoShaderStr.c_str(), "Main3PlaneFmtPS", "ps_5_1"),
-                CompileShader(videoShaderStr.c_str(), "MainBlend3PlaneFmtPS", "ps_5_1"),
-                CompileShader(videoShaderStr.c_str(), "MainMask3PlaneFmtPS", "ps_5_1")
-            };
-        }
-    };
-
-    struct CoreMultiViewShadersSM6 {
-        using ShaderByteCode = std::vector<std::uint8_t>;
-        using VideoPShaderList = std::array<ShaderByteCode, VideoPShader::TypeCount>;
-
-        ShaderByteCode   lobbyVS;
-        ShaderByteCode   lobbyPS;
-        ShaderByteCode   videoVS;
-        VideoPShaderList videoPSList;
-
-        inline CoreMultiViewShadersSM6(const CoreMultiViewShadersSM6&) noexcept = default;
-        inline CoreMultiViewShadersSM6(CoreMultiViewShadersSM6&&) noexcept = default;
-        inline CoreMultiViewShadersSM6& operator=(const CoreMultiViewShadersSM6&) noexcept = default;
-        inline CoreMultiViewShadersSM6& operator=(CoreMultiViewShadersSM6&&) noexcept = default;
-
-        ShaderByteCodeList<2> GetLobbyByteCodes() const {
-            return {
-                D3D12_SHADER_BYTECODE { lobbyVS.data(), lobbyVS.size() },
-                D3D12_SHADER_BYTECODE { lobbyPS.data(), lobbyPS.size() }
-            };
-        }
-
-        using VideoByteCodeList = ShaderByteCodeList<VideoPShader::TypeCount + 1>;
-        VideoByteCodeList GetVideoByteCodes() const {
-            VideoByteCodeList ret{ D3D12_SHADER_BYTECODE { videoVS.data(), videoVS.size() } };
-            for (std::size_t index = 0; index < videoPSList.size(); ++index) {
-                const auto& ps = videoPSList[index];
-                ret[index + 1] = { ps.data(), ps.size() };
-            }
-            return ret;
-        }
-
-        CoreMultiViewShadersSM6() {
-            using namespace std::filesystem;
-            using Path = std::filesystem::path;
-            constexpr const auto GetCSOPath = [](const std::string_view& csoFile) -> Path
-            {
-                if (exists(csoFile))
-                    return csoFile;
-                std::array<Path, 2> alternateDirs {
-                    Path("shaders"),
-#ifdef NDEBUG
-                    Path("target/release") // for `cargo run`
-#else
-                    Path("target/debug") // for `cargo run`
-#endif
-                };
-                for (auto& csoPath : alternateDirs) {
-                    csoPath.append(csoFile);
-                    if (exists(csoPath))
-                        return csoPath;
-                }
-                return {};
-            };
-            constexpr const auto LoadCSO = [GetCSOPath](const std::string_view& csoFile) {
-                const auto csoPath = GetCSOPath(csoFile);
-                CHECK_MSG(!csoPath.empty(), "CSO path/file does not exist.");
-                const auto csoPathStr = csoPath.string();
-                Log::Write(Log::Level::Verbose, Fmt("Loading D3D12 compiled shader object: %s", csoPathStr.c_str()));
-                auto cso = LoadCompiledShaderObject(csoPath);
-                CHECK_MSG(cso.size() > 0, "Failed to load CSO file!");
-                return cso;
-            };
-            lobbyVS = LoadCSO("multivewLobby_vert.cso");
-            lobbyPS = LoadCSO("multivewLobby_frag.cso");
-            videoVS = LoadCSO("multiviewVideo_vert.cso");
-            videoPSList = {
-                LoadCSO("multiviewVideo_frag.cso"),
-                LoadCSO("passthroughBlend_frag.cso"),
-                LoadCSO("passthroughMask_frag.cso"),
-                LoadCSO("multiviewVideo3PlaneFmt_frag.cso"),
-                LoadCSO("passthroughBlend3PlaneFmt_frag.cso"),
-                LoadCSO("passthroughMask3PlaneFmt_frag.cso"),
-            };
-        }
-    };
-    using CoreShaders = std::variant<
-        CoreShadersSM5,
-        CoreMultiViewShadersSM6
-    >;
-
-    D3D12GraphicsPlugin(const std::shared_ptr<Options>&, std::shared_ptr<IPlatformPlugin>)
-    {}
+    D3D12GraphicsPlugin(const std::shared_ptr<Options>&, std::shared_ptr<IPlatformPlugin>) {}
 
     inline ~D3D12GraphicsPlugin() override { CloseHandle(m_fenceEvent); }
 
@@ -462,15 +365,17 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             Log::Write(Log::Level::Verbose, Fmt("D3D12 View-instancing tier: %d", options.ViewInstancingTier));
         }
 
+        CoreShaders::Path smDir{ "SM5" };
         if (m_isMultiViewSupported) {
             Log::Write(Log::Level::Verbose, "Setting SM6 core (multi-view) shaders.");
-            m_coreShaders = CoreMultiViewShadersSM6();
+            smDir = "multiview";
         }
+        m_coreShaders = smDir;
     }
 
     inline std::uint32_t GetViewProjectionBufferSize() const {
         return static_cast<std::uint32_t>(m_isMultiViewSupported ?
-            sizeof(MultiViewProjectionConstantBuffer) : sizeof(ViewProjectionConstantBuffer));
+            sizeof(ALXR::MultiViewProjectionConstantBuffer) : sizeof(ALXR::ViewProjectionConstantBuffer));
     }
 
     void InitializeDevice(XrInstance instance, XrSystemId systemId, const XrEnvironmentBlendMode newMode) override {
@@ -481,13 +386,14 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         // Create the D3D12 device for the adapter associated with the system.
         XrGraphicsRequirementsD3D12KHR graphicsRequirements{ .type=XR_TYPE_GRAPHICS_REQUIREMENTS_D3D12_KHR, .next=nullptr };
         CHECK_XRCMD(pfnGetD3D12GraphicsRequirementsKHR(instance, systemId, &graphicsRequirements));
-        const ComPtr<IDXGIAdapter1> adapter = GetAdapter(graphicsRequirements.adapterLuid);
+        const ComPtr<IDXGIAdapter1> adapter = ALXR::GetAdapter(graphicsRequirements.adapterLuid);
 
         // Create a list of feature levels which are both supported by the OpenXR runtime and this application.
         InitializeD3D12DeviceForAdapter(adapter.Get(), graphicsRequirements.minFeatureLevel, m_device.ReleaseAndGetAddressOf());
         m_dx12deviceluid = graphicsRequirements.adapterLuid;
 
         CheckMultiViewSupport();
+        CHECK(m_coreShaders.IsValid());
         
         const D3D12_COMMAND_QUEUE_DESC queueDesc{
             .Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -541,12 +447,13 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         texture2Range1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
         texture3Range1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);
 
-        CD3DX12_ROOT_PARAMETER1  rootParams1[5];
+        CD3DX12_ROOT_PARAMETER1  rootParams1[6];
         rootParams1[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_VERTEX);
         rootParams1[1].InitAsConstantBufferView(1, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_VERTEX);
         rootParams1[2].InitAsDescriptorTable(1, &texture1Range1, D3D12_SHADER_VISIBILITY_PIXEL);
         rootParams1[3].InitAsDescriptorTable(1, &texture2Range1, D3D12_SHADER_VISIBILITY_PIXEL);
         rootParams1[4].InitAsDescriptorTable(1, &texture3Range1, D3D12_SHADER_VISIBILITY_PIXEL);
+        rootParams1[5].InitAsConstantBufferView(2, 0, D3D12_ROOT_DESCRIPTOR_FLAG_NONE, D3D12_SHADER_VISIBILITY_PIXEL);
 
         constexpr const D3D12_STATIC_SAMPLER_DESC sampler {
             .Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
@@ -726,7 +633,10 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         m_swapchainImageContexts.emplace_back();
         SwapchainImageContext& swapchainImageContext = m_swapchainImageContexts.back();
 
-        std::vector<XrSwapchainImageBaseHeader*> bases = swapchainImageContext.Create(m_device.Get(), capacity, GetViewProjectionBufferSize());
+        std::vector<XrSwapchainImageBaseHeader*> bases = swapchainImageContext.Create
+        (
+            m_device.Get(), capacity, GetViewProjectionBufferSize(), m_fovDecodeParams
+        );
 
         // Map every swapchainImage base pointer to this context
         for (auto& base : bases) {
@@ -918,7 +828,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
                 D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
             },
         };
-        const auto shaders = std::visit([](const auto& cs) { return cs.GetLobbyByteCodes(); }, m_coreShaders);
+        const auto shaders = m_coreShaders.GetLobbyByteCodes();
         ComPtr<ID3D12PipelineState> pipelineState = MakePipelineState(swapchainFormat, shaders, inputElementDescs);
 
         ID3D12PipelineState* const pipelineStateRaw = pipelineState.Get();
@@ -951,8 +861,8 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         {
             return MakePipelineState(swapchainFormat, shaders, InputElementDescs);
         };
-        const auto videoShaderBCodes = std::visit([](const auto& cs) { return cs.GetVideoByteCodes(); }, m_coreShaders);
-
+        
+        const auto videoShaderBCodes = m_coreShaders.GetVideoByteCodes(m_fovDecodeParams != nullptr);
         const auto newPipelineState = m_VideoPipelineStates.emplace(swapchainFormat, VidePipelineStateList{
             makePipeline({ videoShaderBCodes[0], videoShaderBCodes[1+VideoPShader::Normal] }),
             makePipeline({ videoShaderBCodes[0], videoShaderBCodes[1+VideoPShader::PassthroughBlend] }),
@@ -1087,10 +997,10 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     inline void MakeViewProjMatrix(DirectX::XMFLOAT4X4& viewProj, const XrCompositionLayerProjectionView& layerView) {
-        const XMMATRIX spaceToView = XMMatrixInverse(nullptr, LoadXrPose(layerView.pose));
+        const XMMATRIX spaceToView = XMMatrixInverse(nullptr, ALXR::LoadXrPose(layerView.pose));
         XrMatrix4x4f projectionMatrix;
         XrMatrix4x4f_CreateProjectionFov(&projectionMatrix, GRAPHICS_D3D, layerView.fov, 0.05f, 100.0f);
-        XMStoreFloat4x4(&viewProj, XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
+        XMStoreFloat4x4(&viewProj, XMMatrixTranspose(spaceToView * ALXR::LoadXrMatrix(projectionMatrix)));
     }
 
     virtual void RenderMultiView
@@ -1117,7 +1027,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
             cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
 
-            MultiViewProjectionConstantBuffer viewProjection{ {} };
+            ALXR::MultiViewProjectionConstantBuffer viewProjection{ {} };
             for (std::size_t viewIndex = 0; viewIndex < 2; ++viewIndex) {
                 MakeViewProjMatrix(viewProjection.ViewProjection[viewIndex], layerViews[viewIndex]);
             }
@@ -1165,7 +1075,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
             
             // Set shaders and constant buffers.
-            ViewProjectionConstantBuffer viewProjection{ {}, 0 };
+            ALXR::ViewProjectionConstantBuffer viewProjection{ {}, 0 };
             MakeViewProjMatrix(viewProjection.ViewProjection, layerView);
 
             ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
@@ -1200,7 +1110,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         cmdList->IASetIndexBuffer(&indexBufferView);
         cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-        constexpr const std::uint32_t cubeCBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ModelConstantBuffer));
+        constexpr const std::uint32_t cubeCBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ALXR::ModelConstantBuffer));
         swapchainContext.RequestModelCBuffer(static_cast<uint32_t>(cubeCBufferSize * cubes.size()));
         ID3D12Resource* const modelCBuffer = swapchainContext.GetModelCBuffer();
 
@@ -1208,9 +1118,9 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         std::uint32_t offset = 0;
         for (const Cube& cube : cubes) {
             // Compute and update the model transform.
-            ModelConstantBuffer model;
+            ALXR::ModelConstantBuffer model;
             XMStoreFloat4x4(&model.Model,
-                XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * LoadXrPose(cube.Pose)));
+                XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * ALXR::LoadXrPose(cube.Pose)));
             {
                 constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
                 std::uint8_t* data = nullptr;                
@@ -1392,7 +1302,6 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
     void InitD3D11OnD3D12()
     {
-        //assert(false);
         if (m_device == nullptr)
             return;
         UINT d3d11DeviceFlags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT;// | D3D11_CREATE_DEVICE_BGRA_SUPPORT;//0;//
@@ -1706,7 +1615,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             cmdList->SetGraphicsRootDescriptorTable(3, videoTex.chromaGpuHandle);
             if (m_is3PlaneFormat)
                 cmdList->SetGraphicsRootDescriptorTable(4, videoTex.chromaVGpuHandle);
-                        
+            
             cmdList->ClearRenderTargetView(renderTargetView, ALXR::VideoClearColors[ClearColorIndex(newMode)], 0, nullptr);
             cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
@@ -1714,7 +1623,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
 
             // Set shaders and constant buffers.
-            MultiViewProjectionConstantBuffer viewProjection{};
+            ALXR::MultiViewProjectionConstantBuffer viewProjection{};
             for (std::size_t viewIndex = 0; viewIndex < 2; ++viewIndex) {
                 XMStoreFloat4x4(&viewProjection.ViewProjection[viewIndex], XMMatrixIdentity());
             }
@@ -1737,11 +1646,11 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             cmdList->IASetIndexBuffer(&indexBufferView);
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            constexpr const std::uint32_t modelBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ModelConstantBuffer));
+            constexpr const std::uint32_t modelBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ALXR::ModelConstantBuffer));
             swapchainContext.RequestModelCBuffer(modelBufferSize);
             ID3D12Resource* const modelCBuffer = swapchainContext.GetModelCBuffer();
 
-            ModelConstantBuffer model;
+            ALXR::ModelConstantBuffer model;
             XMStoreFloat4x4(&model.Model, XMMatrixIdentity());
             {
                 constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
@@ -1753,6 +1662,10 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
                 modelCBuffer->Unmap(0, &writeRange);
             }
             cmdList->SetGraphicsRootConstantBufferView(0, modelCBuffer->GetGPUVirtualAddress());
+
+            if (m_fovDecodeParams) {
+                cmdList->SetGraphicsRootConstantBufferView(5, swapchainContext.GetFoveationParamCBuffer()->GetGPUVirtualAddress());
+            }
 
             // Draw Video Quad
             cmdList->DrawIndexedInstanced((UINT)QuadIndices.size(), 1, 0, 0, 0);
@@ -1793,7 +1706,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
             // Set shaders and constant buffers.
             ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
-            ViewProjectionConstantBuffer viewProjection{
+            ALXR::ViewProjectionConstantBuffer viewProjection{
                 .ViewID = viewID
             };
             XMStoreFloat4x4(&viewProjection.ViewProjection, XMMatrixIdentity()); //XMMatrixTranspose(spaceToView * LoadXrMatrix(projectionMatrix)));
@@ -1817,12 +1730,12 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             cmdList->IASetIndexBuffer(&indexBufferView);
             cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-            constexpr const std::uint32_t modelBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ModelConstantBuffer));
+            constexpr const std::uint32_t modelBufferSize = AlignTo<D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT>(sizeof(ALXR::ModelConstantBuffer));
             swapchainContext.RequestModelCBuffer(modelBufferSize);
             ID3D12Resource* const modelCBuffer = swapchainContext.GetModelCBuffer();
 
             // Compute and update the model transform.
-            ModelConstantBuffer model;
+            ALXR::ModelConstantBuffer model;
             XMStoreFloat4x4(&model.Model, XMMatrixIdentity());
             {
                 constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
@@ -1835,6 +1748,10 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
             }
             cmdList->SetGraphicsRootConstantBufferView(0, modelCBuffer->GetGPUVirtualAddress());
 
+            if (m_fovDecodeParams) {
+                cmdList->SetGraphicsRootConstantBufferView(5, swapchainContext.GetFoveationParamCBuffer()->GetGPUVirtualAddress());
+            }
+
             // Draw Video Quad
             cmdList->DrawIndexedInstanced((UINT)QuadIndices.size(), 1, 0, 0, 0);
         }, RenderPipelineType::Video, newMode);
@@ -1842,6 +1759,21 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
     inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
         m_clearColorIndex = (newMode - 1);
+    }
+
+    virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* newFovDecParm) override {
+        const auto fovDecodeParams = m_fovDecodeParams;
+        const bool changePipelines = (fovDecodeParams == nullptr && newFovDecParm != nullptr) ||
+                                     (fovDecodeParams != nullptr && newFovDecParm == nullptr);        
+        if (changePipelines) {
+            m_VideoPipelineStates.clear();
+        }
+        if (newFovDecParm) {
+            for (auto& swapchainCtx : m_swapchainImageContexts)
+                swapchainCtx.SetFoveationDecodeData(*newFovDecParm);
+        }
+        m_fovDecodeParams = newFovDecParm ?
+            std::make_shared<ALXR::FoveatedDecodeParams>(*newFovDecParm) : nullptr;
     }
 
     virtual inline bool IsMultiViewEnabled() const override {
@@ -1928,6 +1860,9 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
     
+    using FoveatedDecodeParamsPtr = SwapchainImageContext::FoveatedDecodeParamsPtr;
+    FoveatedDecodeParamsPtr m_fovDecodeParams{};
+
     bool m_isMultiViewSupported = false;
 };
 

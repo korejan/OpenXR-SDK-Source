@@ -274,7 +274,7 @@ else()
     else()
         message(NOTICE "Could NOT find glslc, using precompiled .spv files")
     endif()
-    
+
     function(compile_glsl run_target_name)
         if(GLSL_COMPILER)
             set(GLSL_FLAGS -Werror -O -mfmt=c)
@@ -291,7 +291,7 @@ else()
             set(out_file2 ${CMAKE_CURRENT_BINARY_DIR}/shaders/multiview/${glsl_file}.spv)
             if (glsl_stage STREQUAL "frag")
                 set(out_file3 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/${glsl_file}.spv)
-                set(out_file4 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/multiview/${glsl_file}.spv)
+                set(out_file4 ${CMAKE_CURRENT_BINARY_DIR}/shaders/multiview/fovDecode/${glsl_file}.spv)
             endif()
 
             if(GLSL_COMPILER)
@@ -334,19 +334,22 @@ else()
                     )
                 endif()
             else()
+                message(NOTICE "Poopy")
                 # Use the precompiled .spv files
                 get_filename_component(glsl_src_dir ${in_file} DIRECTORY)
-                set(precompiled_file ${glsl_src_dir}/precompiled/${glsl_file}.spv)
+                set(glsl_precompiled_dir ${glsl_src_dir}/precompiled)
+
+                set(precompiled_file ${glsl_precompiled_dir}/${glsl_file}.spv)
                 configure_file(${precompiled_file} ${out_file} COPYONLY)
 
-                set(precompiled_file ${glsl_src_dir}/precompiled/multiview/${glsl_file}.spv)
+                set(precompiled_file ${glsl_precompiled_dir}/multiview/${glsl_file}.spv)
                 configure_file(${precompiled_file} ${out_file2} COPYONLY)
                 
                 if (glsl_stage STREQUAL "frag")
-                    set(precompiled_file ${glsl_src_dir}/precompiled/fovDecode/${glsl_file}.spv)
+                    set(precompiled_file ${glsl_precompiled_dir}/fovDecode/${glsl_file}.spv)
                     configure_file(${precompiled_file} ${out_file3} COPYONLY)
                 
-                    set(precompiled_file ${glsl_src_dir}/precompiled/fovDecode/multiview/${glsl_file}.spv)
+                    set(precompiled_file ${glsl_precompiled_dir}/multiview/fovDecode/${glsl_file}.spv)
                     configure_file(${precompiled_file} ${out_file4} COPYONLY)
                 endif()
             endif()
@@ -367,53 +370,47 @@ if (WIN32 AND MSVC)
         message(NOTICE "Could NOT find dxc, using precompiled CSO files")
     endif()
     
-    set(DXC_FLAGS -nologo -WX -Ges -Zi -Zpc -Qstrip_reflect -Qstrip_debug -O3)
-
     function(compile_hlsl_sm6 run_target_name)
+        set(DXC_FLAGS -nologo -WX -Ges -Zi -Zpc -Qstrip_reflect -Qstrip_debug -O3 -DENABLE_SM6_MULTI_VIEW)
+        set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders/multiview)
+
         set(cso_output_files "")
         foreach(in_file IN LISTS ARGN)
             get_filename_component(hlsl_file ${in_file} NAME_WE)            
             string(REGEX REPLACE "([A-Za-z0-9]*)[_]" "" shader_stage ${hlsl_file})
             
             if(shader_stage STREQUAL "vert")
-                set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
+                set(vs_out_file ${SHADER_DIR}/${hlsl_file}.cso)
             elseif(shader_stage STREQUAL "frag")
-                set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}.cso)
-                #set(ps_out_file2 ${CMAKE_CURRENT_BINARY_DIR}/shaders/yuv3PlaneFmt/${hlsl_file}.cso)
-                #set(ps_out_file3 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/${hlsl_file}.cso)
-                #set(ps_out_file4 ${CMAKE_CURRENT_BINARY_DIR}/shaders/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
+                set(ps_out_file  ${SHADER_DIR}/${hlsl_file}.cso)
+                set(ps_out_file2 ${SHADER_DIR}/yuv3PlaneFmt/${hlsl_file}.cso)
+                set(ps_out_file3 ${SHADER_DIR}/fovDecode/${hlsl_file}.cso)
+                set(ps_out_file4 ${SHADER_DIR}/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
             else()
-                set(vs_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_vert.cso)
-                set(ps_out_file ${CMAKE_CURRENT_BINARY_DIR}/shaders/${hlsl_file}_frag.cso)
+                set(vs_out_file ${SHADER_DIR}/${hlsl_file}_vert.cso)
+                set(ps_out_file ${SHADER_DIR}/${hlsl_file}_frag.cso)
             endif()
 
             if(NOT (DXC_COMPILER STREQUAL "DXC_COMPILER-NOTFOUND"))
                 if(shader_stage STREQUAL "vert")
                     add_custom_command(
-                        OUTPUT ${vs_out_file}
-                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
+                        OUTPUT ${vs_out_file} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
                         DEPENDS ${in_file}
                         VERBATIM
                     )
                 elseif(shader_stage STREQUAL "frag")
                     add_custom_command(
-                        OUTPUT ${ps_out_file}
-                        #OUTPUT ${ps_out_file2}
-                        #OUTPUT ${ps_out_file3}
-                        #OUTPUT ${ps_out_file4}
-                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
-                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file2}
-                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file3}
-                        #COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file4}
+                        OUTPUT ${ps_out_file}  COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
+                        OUTPUT ${ps_out_file2} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file2}
+                        OUTPUT ${ps_out_file3} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file3}
+                        OUTPUT ${ps_out_file4} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -D ENABLE_3PLANE_FMT_SAMPLER -D ENABLE_FOVEATION_DECODE -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file4}
                         DEPENDS ${in_file}
                         VERBATIM
                     )
                 else() # No shader stage specific file suffix, compile all supported stages.
                     add_custom_command(
-                        OUTPUT ${vs_out_file}
-                        OUTPUT ${ps_out_file}
-                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
-                        COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
+                        OUTPUT ${vs_out_file} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T vs_6_1 -E MainVS ${in_file} -Fo ${vs_out_file}
+                        OUTPUT ${ps_out_file} COMMAND ${DXC_COMPILER} ${DXC_FLAGS} -T ps_6_1 -E MainPS ${in_file} -Fo ${ps_out_file}
                         DEPENDS ${in_file}
                         VERBATIM
                     )
@@ -421,27 +418,134 @@ if (WIN32 AND MSVC)
             else()
                 # Use the precompiled .cso files
                 get_filename_component(hlsl_src_dir ${in_file} DIRECTORY)
+                set(hlsl_precompiled_dir ${hlsl_src_dir}/precompiled/multiview)
+
                 if(shader_stage STREQUAL "vert")
-                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}.cso)
+                    set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}.cso)
                     configure_file(${precompiled_file} ${vs_out_file} COPYONLY)
                 elseif(shader_stage STREQUAL "frag")
-                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}.cso)
-                    message(NOTICE ${precompiled_file})
+                    set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}.cso)
                     configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+
+                    set(precompiled_file ${hlsl_precompiled_dir}/yuv3PlaneFmt/${hlsl_file}.cso)
+                    configure_file(${precompiled_file} ${ps_out_file2} COPYONLY)
+
+                    set(precompiled_file ${hlsl_precompiled_dir}/fovDecode/${hlsl_file}.cso)
+                    configure_file(${precompiled_file} ${ps_out_file3} COPYONLY)
+                
+                    set(precompiled_file ${hlsl_precompiled_dir}/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
+                    configure_file(${precompiled_file} ${ps_out_file4} COPYONLY)
                 else() # No shader stage specific file suffix, compile all supported stages.
-                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}_vert.cso)
-                    configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
-                    set(precompiled_file ${hlsl_src_dir}/${hlsl_file}_frag.cso)
+                    set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}_vert.cso)
+                    configure_file(${precompiled_file} ${vs_out_file} COPYONLY)
+                    set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}_frag.cso)
                     configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
                 endif()
             endif()
-            list(APPEND cso_output_files ${vs_out_file} ${ps_out_file})# ${ps_out_file2} ${ps_out_file3} ${ps_out_file4})
+            list(APPEND cso_output_files ${vs_out_file} ${ps_out_file} ${ps_out_file2} ${ps_out_file3} ${ps_out_file4})
         endforeach()
         add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
         set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
     endfunction()
+
+    find_program(FXC_COMPILER fxc.exe)
+    if(NOT (FXC_COMPILER STREQUAL "FXC_COMPILER-NOTFOUND"))
+        message(NOTICE "Found fxc: ${FXC_COMPILER}")
+    else()
+        message(NOTICE "Could NOT find fxc, using precompiled CSO SM5 files")
+    endif()
+
+    function(compile_hlsl_sm5 run_target_name)
+        set(FXC_FLAGS /nologo /WX /Ges /Zi /Zpc /Qstrip_reflect /Qstrip_debug /O3)
+        set(cso_output_files "")
+        
+        set(BASE_SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+        set(SHADER_DIR_LIST SM5 SM5/multivew)
+        set(VIEW_DEF_LIST "" /DENABLE_SM5_MULTI_VIEW)
+
+        foreach(in_file IN LISTS ARGN)
+            get_filename_component(hlsl_file ${in_file} NAME_WE)            
+            string(REGEX REPLACE "([A-Za-z0-9]*)[_]" "" shader_stage ${hlsl_file})
+            foreach(SHADER_SUBDIR VIEW_DEF IN ZIP_LISTS SHADER_DIR_LIST VIEW_DEF_LIST)                
+                set(SHADER_DIR ${BASE_SHADER_DIR}/${SHADER_SUBDIR})
+                
+                if(shader_stage STREQUAL "vert")
+                    set(vs_out_file ${SHADER_DIR}/${hlsl_file}.cso)
+                elseif(shader_stage STREQUAL "frag")
+                    set(ps_out_file  ${SHADER_DIR}/${hlsl_file}.cso)
+                    set(ps_out_file2 ${SHADER_DIR}/yuv3PlaneFmt/${hlsl_file}.cso)
+                    set(ps_out_file3 ${SHADER_DIR}/fovDecode/${hlsl_file}.cso)
+                    set(ps_out_file4 ${SHADER_DIR}/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
+                else()
+                    set(vs_out_file ${SHADER_DIR}/${hlsl_file}_vert.cso)
+                    set(ps_out_file ${SHADER_DIR}/${hlsl_file}_frag.cso)
+                endif()
+
+                if(NOT (FXC_COMPILER STREQUAL "FXC_COMPILER-NOTFOUND"))
+                    if(shader_stage STREQUAL "vert")
+                        add_custom_command(
+                            OUTPUT ${vs_out_file} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /Tvs_5_0 /EMainVS ${in_file} /Fo ${vs_out_file}
+                            DEPENDS ${in_file}
+                            VERBATIM
+                        )
+                    elseif(shader_stage STREQUAL "frag")
+                        add_custom_command(
+                            OUTPUT ${ps_out_file}  COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /Tps_5_0 /EMainPS ${in_file} /Fo ${ps_out_file}
+                            OUTPUT ${ps_out_file2} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /DENABLE_3PLANE_FMT_SAMPLER /Tps_5_0 /EMainPS ${in_file} /Fo ${ps_out_file2}
+                            OUTPUT ${ps_out_file3} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /DENABLE_FOVEATION_DECODE /Tps_5_0 /EMainPS ${in_file} /Fo ${ps_out_file3}
+                            OUTPUT ${ps_out_file4} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /DENABLE_3PLANE_FMT_SAMPLER /DENABLE_FOVEATION_DECODE /Tps_5_0 /EMainPS ${in_file} /Fo ${ps_out_file4}
+                            DEPENDS ${in_file}
+                            VERBATIM
+                        )
+                    else() # No shader stage specific file suffix, compile all supported stages.
+                        add_custom_command(
+                            OUTPUT ${vs_out_file} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /Tvs_5_0 /EMainVS ${in_file} /Fo ${vs_out_file}
+                            OUTPUT ${ps_out_file} COMMAND ${FXC_COMPILER} ${FXC_FLAGS} ${VIEW_DEF} /Tps_5_0 /EMainPS ${in_file} /Fo ${ps_out_file}
+                            DEPENDS ${in_file}
+                            VERBATIM
+                        )
+                    endif()
+                else()
+                    # Use the precompiled .cso files
+                    get_filename_component(hlsl_src_dir ${in_file} DIRECTORY)
+                    set(hlsl_precompiled_dir ${hlsl_src_dir}/precompiled/${SHADER_SUBDIR})
+
+                    if(shader_stage STREQUAL "vert")
+                        set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}.cso)
+                        configure_file(${precompiled_file} ${vs_out_file} COPYONLY)
+                    elseif(shader_stage STREQUAL "frag")
+                        set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}.cso)
+                        configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+
+                        set(precompiled_file ${hlsl_precompiled_dir}/yuv3PlaneFmt/${hlsl_file}.cso)
+                        configure_file(${precompiled_file} ${ps_out_file2} COPYONLY)
+
+                        set(precompiled_file ${hlsl_precompiled_dir}/fovDecode/${hlsl_file}.cso)
+                        configure_file(${precompiled_file} ${ps_out_file3} COPYONLY)
+                
+                        set(precompiled_file ${hlsl_precompiled_dir}/fovDecode/yuv3PlaneFmt/${hlsl_file}.cso)
+                        configure_file(${precompiled_file} ${ps_out_file4} COPYONLY)
+                    else() # No shader stage specific file suffix, compile all supported stages.
+                        set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}_vert.cso)
+                        configure_file(${precompiled_file} ${vs_out_file} COPYONLY)
+                        set(precompiled_file ${hlsl_precompiled_dir}/${hlsl_file}_frag.cso)
+                        configure_file(${precompiled_file} ${ps_out_file} COPYONLY)
+                    endif()
+                endif()
+                list(APPEND cso_output_files ${vs_out_file} ${ps_out_file} ${ps_out_file2} ${ps_out_file3} ${ps_out_file4})
+            endforeach()
+        endforeach()
+        add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
+        set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
+    endfunction()
+
 else()
     function(compile_hlsl_sm6 run_target_name)
+        set(cso_output_files "")
+        add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
+        set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})
+    endfunction()
+    function(compile_hlsl_sm5 run_target_name)
         set(cso_output_files "")
         add_custom_target(${run_target_name} ALL DEPENDS ${cso_output_files})
         set_target_properties(${run_target_name} PROPERTIES FOLDER ${HELPER_FOLDER})

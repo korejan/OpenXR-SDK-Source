@@ -112,8 +112,8 @@ virtual void CreateVideoTexturesCUDA(const std::size_t width, const std::size_t 
 
     const auto yuvFormat = MapFormat(pixfmt);
 
-    /*constexpr*/ const DXGI_FORMAT LUMA_FORMAT = GetLumaFormat(yuvFormat);
-    /*constexpr*/ const DXGI_FORMAT CHROMA_FORMAT = GetChromaFormat(yuvFormat);
+    /*constexpr*/ const DXGI_FORMAT LUMA_FORMAT = ALXR::GetLumaFormat(yuvFormat);
+    /*constexpr*/ const DXGI_FORMAT CHROMA_FORMAT = ALXR::GetChromaFormat(yuvFormat);
 
     size_t texIndex = 0;
     for (std::size_t index = 0; index < m_videoTextures.size(); ++index)

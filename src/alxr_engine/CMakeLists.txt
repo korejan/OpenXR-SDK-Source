@@ -28,10 +28,10 @@ FetchContent_MakeAvailable(readerwriterqueue)
 file(GLOB LOCAL_HEADERS "*.h")
 file(GLOB LOCAL_SOURCE "*.cpp")
 file(GLOB VULKAN_SHADERS "vulkan_shaders/*.glsl")
-file(GLOB D3D12_SHADERS "d3d12_shaders/*.hlsl")
+file(GLOB D3D_SHADERS "d3d_shaders/*.hlsl")
 
 # Mark HLSL files to prevent the VS generator adding them for automatic shader compilation with FXC (they should be compiled with DXC for SM6 support)
-foreach(hlsl_file IN LISTS D3D12_SHADERS)
+foreach(hlsl_file IN LISTS D3D_SHADERS)
     set_source_files_properties(${hlsl_file} PROPERTIES VS_TOOL_OVERRIDE "None")
 endforeach()
 
@@ -65,7 +65,7 @@ else()
         ${LOCAL_SOURCE}
         ${LOCAL_HEADERS}
         ${VULKAN_SHADERS}
-        ${D3D12_SHADERS})
+        ${D3D_SHADERS})
 endif()
 set_target_properties(alxr_engine PROPERTIES FOLDER ${SAMPLES_FOLDER})
 target_compile_definitions(alxr_engine PRIVATE ALXR_CLIENT)
@@ -77,12 +77,14 @@ source_group("Headers" FILES ${LOCAL_HEADERS})
 source_group("Shaders" FILES ${VULKAN_SHADERS})
 
 compile_glsl(run_alxr_engine_glsl_compiles ${VULKAN_SHADERS})
-compile_hlsl_sm6(run_alxr_engine_hlsl_compiles ${D3D12_SHADERS})
+compile_hlsl_sm5(run_alxr_engine_hlsl_sm5_compiles ${D3D_SHADERS})
+compile_hlsl_sm6(run_alxr_engine_hlsl_sm6_compiles ${D3D_SHADERS})
 
 add_dependencies(alxr_engine
     generate_openxr_header
     run_alxr_engine_glsl_compiles
-    run_alxr_engine_hlsl_compiles
+    run_alxr_engine_hlsl_sm5_compiles
+    run_alxr_engine_hlsl_sm6_compiles
 )
 
 set(ALVR_ROOT_DIR ${PROJECT_SOURCE_DIR}/../../../../.. CACHE PATH "Root directory of ALVR source")

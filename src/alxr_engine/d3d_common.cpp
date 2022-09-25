@@ -14,6 +14,8 @@
 
 #include "d3d_common.h"
 
+namespace ALXR {;
+
 using namespace Microsoft::WRL;
 using namespace DirectX;
 
@@ -76,6 +78,32 @@ ComPtr<ID3DBlob> CompileShader(const char* hlsl, const char* entrypoint, const c
     return compiled;
 }
 
+Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderFromFile(LPCWSTR hlslFile, const D3D_SHADER_MACRO* pDefines, const char* entrypoint, const char* shaderTarget) {
+    ComPtr<ID3DBlob> compiled;
+    ComPtr<ID3DBlob> errMsgs;
+    DWORD flags = D3DCOMPILE_PACK_MATRIX_COLUMN_MAJOR | D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS;
+
+#if !defined(NDEBUG)
+    flags |= D3DCOMPILE_SKIP_OPTIMIZATION | D3DCOMPILE_DEBUG;
+#else
+    flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
+#endif
+
+    HRESULT hr = D3DCompileFromFile
+    (
+        hlslFile, pDefines,
+        nullptr, entrypoint, shaderTarget, flags, 0,
+        compiled.GetAddressOf(), errMsgs.GetAddressOf()
+    );
+    if (FAILED(hr)) {
+        std::string errMsg((const char*)errMsgs->GetBufferPointer(), errMsgs->GetBufferSize());
+        Log::Write(Log::Level::Error, Fmt("D3DCompile failed %X: %s", hr, errMsg.c_str()));
+        THROW_HR(hr, "D3DCompile");
+    }
+
+    return compiled;
+}
+
 ComPtr<IDXGIAdapter1> GetAdapter(LUID adapterId) {
     // Create the DXGI factory.
     ComPtr<IDXGIFactory6> dxgiFactory;
@@ -91,5 +119,5 @@ ComPtr<IDXGIAdapter1> GetAdapter(LUID adapterId) {
     
     return dxgiAdapter;
 }
-
+}
 #endif

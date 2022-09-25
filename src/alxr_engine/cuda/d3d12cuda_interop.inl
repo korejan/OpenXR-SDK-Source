@@ -147,8 +147,8 @@ virtual void CreateVideoTexturesCUDA(const std::size_t width, const std::size_t 
 
     const auto yuvFormat = MapFormat(pixfmt);
 
-    /*constexpr*/ const DXGI_FORMAT LUMA_FORMAT = GetLumaFormat(yuvFormat);
-    /*constexpr*/ const DXGI_FORMAT CHROMA_FORMAT = GetChromaFormat(yuvFormat);
+    /*constexpr*/ const DXGI_FORMAT LUMA_FORMAT = ALXR::GetLumaFormat(yuvFormat);
+    /*constexpr*/ const DXGI_FORMAT CHROMA_FORMAT = ALXR::GetChromaFormat(yuvFormat);
 
     const std::uint32_t descriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle(m_srvHeap->GetCPUDescriptorHandleForHeapStart());

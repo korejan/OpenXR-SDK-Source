@@ -2874,7 +2874,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         using namespace Microsoft::WRL;
         using namespace DirectX;
         const LUID adapterLUID = *reinterpret_cast<const LUID*>(m_vkDeviceLUID.data());
-        const ComPtr<IDXGIAdapter1> adapter = GetAdapter(adapterLUID);
+        const ComPtr<IDXGIAdapter1> adapter = ALXR::GetAdapter(adapterLUID);
         if (adapter == nullptr) {
             Log::Write(Log::Level::Warning, "Failed to find suitable adaptor, client will fallback to an unknown device type.");
         }
@@ -2973,13 +2973,13 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             } };
             fragShaders[VideoFragShaderType::FoveatedDecode] = {{
                 SPV_PREFIX
-                    #include "shaders/fovDecode/multiview/videoStream_frag.spv"
+                    #include "shaders/multiview/fovDecode/videoStream_frag.spv"
                 SPV_SUFFIX,
                 SPV_PREFIX
-                    #include "shaders/fovDecode/multiview/passthroughBlend_frag.spv"
+                    #include "shaders/multiview/fovDecode/passthroughBlend_frag.spv"
                 SPV_SUFFIX,
                 SPV_PREFIX
-                    #include "shaders/fovDecode/multiview/passthroughMask_frag.spv"
+                    #include "shaders/multiview/fovDecode/passthroughMask_frag.spv"
                 SPV_SUFFIX
             }};
         }
