@@ -104,7 +104,6 @@
 #endif
 #include <vulkan/vulkan.h>
 #endif
-
 //
 // OpenXR Headers
 //
