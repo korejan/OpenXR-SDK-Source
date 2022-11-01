@@ -34,6 +34,21 @@
     #include <unistd.h>
 #endif
 
+#ifdef XR_USE_OXR_OCULUS
+#ifdef XR_USE_PLATFORM_ANDROID
+    #include <arpa/inet.h>
+    #include <errno.h>
+    #include <netinet/in.h>
+    #include <signal.h>
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <strings.h>
+    #include <sys/socket.h>
+    #include <sys/types.h>
+    #include <unistd.h>
+#endif
+#endif
+
 #include "xr_utils.h"
 #include "concurrent_queue.h"
 //#include "alxr_engine.h"
@@ -43,6 +58,8 @@
 #include "latency_manager.h"
 #include "interaction_profiles.h"
 #include "interaction_manager.h"
+
+#define FT_ET_PROXY_PORT 13191
 
 #ifdef XR_USE_PLATFORM_ANDROID
 #ifndef ALXR_ENGINE_DISABLE_QUIT_ACTION
@@ -396,6 +413,25 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
+#ifdef XR_USE_OXR_OCULUS
+        if (eyeTracker_ != XR_NULL_HANDLE)
+        {
+            Log::Write(Log::Level::Verbose, "Destroying EyeTracker");
+            m_xrDestroyEyeTrackerFB_(eyeTracker_);
+        }
+
+        if (faceTracker_ != XR_NULL_HANDLE)
+        {
+            Log::Write(Log::Level::Verbose, "Destroying FaceTracker");
+            m_xrDestroyFaceTrackerFB_(faceTracker_);
+        }
+
+#ifdef XR_USE_PLATFORM_ANDROID
+        if (proxy_fd != 0) {
+            close(proxy_fd);
+        }
+#endif
+#endif
         m_interactionManager.reset();
 
         if (m_visualizedSpaces.size() > 0) {
@@ -474,13 +510,10 @@ struct OpenXrProgram final : IOpenXrProgram {
         { XR_FB_COLOR_SPACE_EXTENSION_NAME, false },
         { XR_FB_PASSTHROUGH_EXTENSION_NAME, false },
 #ifdef XR_USE_OXR_OCULUS
-        { XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME, false }
+        { XR_FB_TOUCH_CONTROLLER_PRO_EXTENSION_NAME, false },
         //{ XR_FB_TOUCH_CONTROLLER_EXTRAS_EXTENSION_NAME, false },
-        // TODO: Uncomment these to enable using FB facial & social eye tracking extensions
-        //       Uncomment alvr\openxr-client\alxr-android-client\quest\Cargo.toml the relevant use-features/permissions
-        //       Add permission requests to alvr\openxr-client\alxr-android-client\src\permissions.rs
-        // { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, false },
-        // { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
+        { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, false },
+        { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
 #endif
 #ifdef XR_USE_OXR_PICO
 #pragma message ("Pico Neo 3 OXR Extensions Enabled.")
@@ -1012,6 +1045,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         InitializePassthroughAPI();
         InitializeEyeTrackers();
         InitializeFacialTracker();
+        initializeProxyServer();
         return InitializeHandTrackers();
     }
 
@@ -1047,24 +1081,138 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
+#ifdef XR_USE_OXR_OCULUS
+    XrEyeTrackerFB eyeTracker_ = XR_NULL_HANDLE;
+    PFN_xrDestroyEyeTrackerFB m_xrDestroyEyeTrackerFB_ = nullptr;
+    PFN_xrGetEyeGazesFB m_xrGetEyeGazesFB_ = nullptr;
+#endif
     bool InitializeEyeTrackers()
     {
 #ifdef XR_USE_OXR_OCULUS
-        //XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
-        //    .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
-        //    .next = nullptr
-        //};
-        //XrSystemProperties systemProperties{
-        //    .type = XR_TYPE_SYSTEM_PROPERTIES,
-        //    .next = &eyeTrackingSystemProperties
-        //};
-        //CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        //if (!eyeTrackingSystemProperties.supportsEyeTracking) {
-        //    Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
-        //    return false;
-        //}
+        XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
+            .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
+            .next = nullptr
+        };
+        XrSystemProperties systemProperties{
+            .type = XR_TYPE_SYSTEM_PROPERTIES,
+            .next = &eyeTrackingSystemProperties
+        };
+        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
+        if (!eyeTrackingSystemProperties.supportsEyeTracking) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            return false;
+        }
 
-        //Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+        // Acquire Function Pointers
+        PFN_xrCreateEyeTrackerFB m_xrCreateEyeTrackerFB_ = nullptr;
+
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance, "xrCreateEyeTrackerFB", (PFN_xrVoidFunction*)(&m_xrCreateEyeTrackerFB_)));
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance,
+            "xrDestroyEyeTrackerFB",
+            (PFN_xrVoidFunction*)(&m_xrDestroyEyeTrackerFB_)));
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance, "xrGetEyeGazesFB", (PFN_xrVoidFunction*)(&m_xrGetEyeGazesFB_)));
+
+        if (m_xrCreateEyeTrackerFB_ == nullptr ||
+            m_xrDestroyEyeTrackerFB_ == nullptr ||
+            m_xrGetEyeGazesFB_ == nullptr) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            return false;
+        }
+
+        Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+
+        // Create Eye Tracker
+        XrEyeTrackerCreateInfoFB createInfo{ XR_TYPE_EYE_TRACKER_CREATE_INFO_FB };
+        m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTracker_);
+
+        // Retrieve Eye Gaze Data
+        XrEyeGazesFB eyeGazes{ XR_TYPE_EYE_GAZES_FB };
+        eyeGazes.next = nullptr;
+
+        XrEyeGazesInfoFB gazesInfo{ XR_TYPE_EYE_GAZES_INFO_FB };
+        gazesInfo.baseSpace = m_appSpace;
+
+        m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
+#endif
+        return true;
+    }
+
+#ifdef XR_USE_OXR_OCULUS
+    XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
+    PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
+    PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
+
+#ifdef XR_USE_PLATFORM_ANDROID
+    int proxy_fd = 0;
+    fd_set proxy_rset;
+    int proxy_listen_sock;
+    struct timeval proxy_timeout;
+#endif
+#endif
+    bool initializeProxyServer()
+    {
+#if defined(XR_USE_PLATFORM_ANDROID) && defined(XR_USE_OXR_OCULUS)
+        if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE) {
+            Log::Write(Log::Level::Warning, "Facial/Eye Tracking not enabled, a proxy server not created.");
+            return false;
+        }
+
+        int SERVER_PORT = FT_ET_PROXY_PORT;
+        int nready;
+        fd_set rset;
+
+        // socket address used for the server
+        struct sockaddr_in server_address;
+        memset(&server_address, 0, sizeof(server_address));
+        server_address.sin_family = AF_INET;
+
+        // htons: host to network short: transforms a value in host byte
+        // ordering format to a short value in network byte ordering format
+        server_address.sin_port = htons(SERVER_PORT);
+
+        // htonl: host to network long: same as htons but to long
+        server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        // create a TCP socket, creation returns -1 on failure
+        int listen_sock;
+        if ((listen_sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+            printf("could not create listen socket\n");
+            return 1;
+        }
+
+        // bind it to listen to the incoming connections on the created server
+        // address, will return -1 on error
+        if ((bind(listen_sock, (struct sockaddr*)&server_address,
+            sizeof(server_address))) < 0) {
+            printf("could not bind socket\n");
+            return 1;
+        }
+
+        int wait_size = 16;  // maximum number of waiting clients, after which
+        // dropping begins
+        if (listen(listen_sock, wait_size) < 0) {
+            printf("could not open socket for listening\n");
+            return 1;
+        }
+
+        // socket address used to store client address
+        struct sockaddr_in client_address;
+        socklen_t client_address_len = 0;
+
+        proxy_timeout.tv_sec = 0;
+        proxy_timeout.tv_usec = 20000;
+
+        FD_ZERO(&rset);
+
+
+        proxy_fd = 0;
+        proxy_rset = rset;
+        proxy_listen_sock = listen_sock;
+
+        Log::Write(Log::Level::Info, "Facial/Eye Tracking Proxy server created.");
 #endif
         return true;
     }
@@ -1072,21 +1220,48 @@ struct OpenXrProgram final : IOpenXrProgram {
     bool InitializeFacialTracker()
     {
 #ifdef XR_USE_OXR_OCULUS
-        //XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
-        //    .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
-        //    .next = nullptr
-        //};
-        //XrSystemProperties systemProperties{
-        //    .type = XR_TYPE_SYSTEM_PROPERTIES,
-        //    .next = &faceTrackingSystemProperties
-        //};
-        //CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        //if (!faceTrackingSystemProperties.supportsFaceTracking) {
-        //    Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
-        //    return false;
-        //}
+        XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
+            .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
+            .next = nullptr
+        };
+        XrSystemProperties systemProperties{
+            .type = XR_TYPE_SYSTEM_PROPERTIES,
+            .next = &faceTrackingSystemProperties
+        };
+        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
+        if (!faceTrackingSystemProperties.supportsFaceTracking) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            return false;
+        }
 
-        //Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+        // Acquire Function Pointers
+        PFN_xrCreateFaceTrackerFB m_xrCreateFaceTrackerFB_ = nullptr;
+
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance,
+            "xrCreateFaceTrackerFB",
+            (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerFB_)));
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance,
+            "xrDestroyFaceTrackerFB",
+            (PFN_xrVoidFunction*)(&m_xrDestroyFaceTrackerFB_)));
+        CHECK_XRCMD(xrGetInstanceProcAddr(
+            m_instance,
+            "xrGetFaceExpressionWeightsFB",
+            (PFN_xrVoidFunction*)(&m_xrGetFaceExpressionWeightsFB_)));
+
+        if (m_xrCreateFaceTrackerFB_ == nullptr ||
+            m_xrDestroyFaceTrackerFB_ == nullptr ||
+            m_xrGetFaceExpressionWeightsFB_ == nullptr) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            return false;
+        }
+
+        Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+
+        faceTracker_ = XR_NULL_HANDLE;
+        XrFaceTrackerCreateInfoFB createInfo{ XR_TYPE_FACE_TRACKER_CREATE_INFO_FB };
+        m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTracker_);
 #endif
         return true;
     }
@@ -1615,6 +1790,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         *exitRenderLoop = *requestRestart = false;
 
         PollStreamConfigEvents();
+
+        PollFaceEyeTracking();
 
         // Process all pending messages.
         while (const XrEventDataBaseHeader* event = TryReadNextEvent()) {
@@ -2524,6 +2701,100 @@ struct OpenXrProgram final : IOpenXrProgram {
         // TODO: Check for thread sync!
         config = m_streamConfig;
         return true;
+    }
+
+#ifdef XR_USE_OXR_OCULUS
+    //XrFaceExpressionInfoFB exinfo;
+    //XrFaceExpressionWeightsV2FB exweights;
+    //#define num_ft_pars 72
+
+    XrFaceExpressionWeightsFB expressionWeights{ XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB };
+    float weights_[XR_FACE_EXPRESSION_COUNT_FB] = {};
+    float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
+    XrFaceExpressionInfoFB expressionInfo{ XR_TYPE_FACE_EXPRESSION_INFO_FB };
+    XrTime last_time;
+    bool swch = false;
+    //int fc=0; // hack cause last time dont work
+    //bool fsw = false;
+
+    int face_buffer_size = XR_FACE_EXPRESSION_COUNT_FB * 4;
+
+    int face_buffer_offset1 = face_buffer_size;
+    int face_buffer_offset2 = face_buffer_offset1 + (8 * 4);
+
+    int tracking_buffer_size = (XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4);
+
+    char ft_et_buffer[(XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4)];
+
+    XrEyeGazesFB eyeGazes{ XR_TYPE_EYE_GAZES_FB };
+    XrEyeGazesInfoFB gazesInfo{ XR_TYPE_EYE_GAZES_INFO_FB };
+#endif
+
+    void PollFaceEyeTracking()
+    {
+#ifdef XR_USE_OXR_OCULUS
+        if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE)
+            return;
+
+        expressionWeights.next = nullptr;
+        expressionWeights.weights = weights_;
+
+        expressionWeights.confidences = confidence_;
+        expressionWeights.weightCount = XR_FACE_EXPRESSION_COUNT_FB;
+        expressionWeights.confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB;
+
+#ifdef XR_USE_PLATFORM_ANDROID
+        if (proxy_fd == 0) {
+            Log::Write(Log::Level::Info, "ProxyFD is 0, accpeting con");
+            //FD_ZERO(&proxy_rset);
+            FD_SET(proxy_listen_sock, &proxy_rset);
+
+            // select the ready descriptor
+            int nready = select(proxy_listen_sock + 1, &proxy_rset, NULL, NULL, &proxy_timeout);
+
+            Log::Write(Log::Level::Info, Fmt("ProxyFD is 0, accpeting con %i", nready));
+
+            // if tcp socket is readable then handle
+            // it by accepting the connection
+            if (FD_ISSET(proxy_listen_sock, &proxy_rset)) {
+                Log::Write(Log::Level::Info, "ready to accept!");
+                struct sockaddr_in client_address;
+                socklen_t client_address_len = 0;
+                int sock = accept(proxy_listen_sock, (struct sockaddr*)&client_address, &client_address_len);
+                if (sock < 0) {
+                    Log::Write(Log::Level::Info, "could not open a socket to accept data");
+                }
+                else {
+                    Log::Write(Log::Level::Info, "Received connection!");
+                    proxy_fd = sock;
+                }
+            }
+        }
+#endif
+
+        swch = !swch;
+        if (swch) {
+            eyeGazes.next = nullptr;
+            gazesInfo.baseSpace = m_appSpace;
+            
+            assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+            m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
+            
+            assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+            m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
+            
+#ifdef XR_USE_PLATFORM_ANDROID
+            if (proxy_fd != 0) {
+                memcpy(ft_et_buffer, weights_, face_buffer_size);
+                memcpy(ft_et_buffer + face_buffer_offset1, &eyeGazes.gaze[0].isValid, 4);
+                memcpy(ft_et_buffer + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
+                memcpy(ft_et_buffer + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
+                memcpy(ft_et_buffer + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
+                write(proxy_fd, ft_et_buffer, tracking_buffer_size);
+            }
+#endif
+        }
+#endif
     }
 
     void PollStreamConfigEvents()
