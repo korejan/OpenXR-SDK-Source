@@ -37,16 +37,14 @@
 
 #ifdef XR_USE_OXR_OCULUS
 #ifdef XR_USE_PLATFORM_ANDROID
-    #include <arpa/inet.h>
     #include <errno.h>
-    #include <netinet/in.h>
     #include <signal.h>
-    #include <stdio.h>
-    #include <stdlib.h>
-    #include <strings.h>
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    #include <netinet/in.h>
+    #include <netinet/tcp.h>
     #include <sys/socket.h>
     #include <sys/types.h>
-    #include <unistd.h>
 #endif
 #endif
 
@@ -60,8 +58,6 @@
 #include "interaction_profiles.h"
 #include "interaction_manager.h"
 
-#define FT_ET_PROXY_PORT 13191
-
 #ifdef XR_USE_PLATFORM_ANDROID
 #ifndef ALXR_ENGINE_DISABLE_QUIT_ACTION
 #define ALXR_ENGINE_DISABLE_QUIT_ACTION
@@ -69,6 +65,8 @@
 #endif
 
 //#define ALXR_ENGINE_ENABLE_VIZ_SPACES
+
+constexpr inline const std::uint16_t FT_ET_PROXY_PORT = 13191;
 
 namespace {
 #if !defined(XR_USE_PLATFORM_WIN32)
@@ -461,8 +459,15 @@ struct OpenXrProgram final : IOpenXrProgram {
         }
 
 #ifdef XR_USE_PLATFORM_ANDROID
-        if (proxy_fd != 0) {
+        if (proxy_fd != SOCKET_NULL_HANDLE) {
+            Log::Write(Log::Level::Verbose, "Closing Proxy Client Connection");
             close(proxy_fd);
+            proxy_fd = SOCKET_NULL_HANDLE;
+        }
+        if (proxy_listen_sock != SOCKET_NULL_HANDLE) {
+            Log::Write(Log::Level::Verbose, "Shutting Down Proxy Server");
+            close(proxy_listen_sock);
+            proxy_listen_sock = SOCKET_NULL_HANDLE;
         }
 #endif
 #endif
@@ -1145,7 +1150,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         InitializePassthroughAPI();
         InitializeEyeTrackers();
         InitializeFacialTracker();
-        initializeProxyServer();
+        InitializeProxyServer();
         return InitializeHandTrackers();
     }
 
@@ -1232,17 +1237,12 @@ struct OpenXrProgram final : IOpenXrProgram {
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
 
         // Create Eye Tracker
-        XrEyeTrackerCreateInfoFB createInfo{ XR_TYPE_EYE_TRACKER_CREATE_INFO_FB };
-        m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTracker_);
-
-        // Retrieve Eye Gaze Data
-        XrEyeGazesFB eyeGazes{ XR_TYPE_EYE_GAZES_FB };
-        eyeGazes.next = nullptr;
-
-        XrEyeGazesInfoFB gazesInfo{ XR_TYPE_EYE_GAZES_INFO_FB };
-        gazesInfo.baseSpace = m_appSpace;
-
-        m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
+        constexpr const XrEyeTrackerCreateInfoFB createInfo {
+            .type = XR_TYPE_EYE_TRACKER_CREATE_INFO_FB,
+            .next = nullptr
+        };
+        CHECK_XRCMD(m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTracker_));
+        CHECK(eyeTracker_ != XR_NULL_HANDLE);
 #endif
         return true;
     }
@@ -1253,71 +1253,63 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
 
 #ifdef XR_USE_PLATFORM_ANDROID
-    int proxy_fd = 0;
-    fd_set proxy_rset;
-    int proxy_listen_sock;
-    struct timeval proxy_timeout;
+    constexpr static const int SOCKET_NULL_HANDLE = -1;
+    fd_set proxy_rset{};
+    int proxy_listen_sock = SOCKET_NULL_HANDLE;
+    int proxy_fd = SOCKET_NULL_HANDLE;
 #endif
 #endif
-    bool initializeProxyServer()
+    bool InitializeProxyServer()
     {
 #if defined(XR_USE_PLATFORM_ANDROID) && defined(XR_USE_OXR_OCULUS)
         if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE) {
             Log::Write(Log::Level::Warning, "Facial/Eye Tracking not enabled, a proxy server not created.");
             return false;
         }
-
-        int SERVER_PORT = FT_ET_PROXY_PORT;
-        int nready;
-        fd_set rset;
-
-        // socket address used for the server
-        struct sockaddr_in server_address;
-        memset(&server_address, 0, sizeof(server_address));
-        server_address.sin_family = AF_INET;
-
-        // htons: host to network short: transforms a value in host byte
-        // ordering format to a short value in network byte ordering format
-        server_address.sin_port = htons(SERVER_PORT);
-
-        // htonl: host to network long: same as htons but to long
-        server_address.sin_addr.s_addr = htonl(INADDR_ANY);
-
+        
         // create a TCP socket, creation returns -1 on failure
-        int listen_sock;
+        int listen_sock = SOCKET_NULL_HANDLE;
         if ((listen_sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-            printf("could not create listen socket\n");
-            return 1;
+            Log::Write(Log::Level::Error, "could not create listen socket");
+            return false;
         }
 
+        int flag = 1;
+        if (setsockopt(listen_sock, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
+            Log::Write(Log::Level::Warning, "Failed to set TCP_NODELAY flag.");
+        }
+
+        // socket address used for the server
+        struct sockaddr_in server_address {
+            .sin_family = AF_INET,
+            // htons: host to network short: transforms a value in host byte
+            // ordering format to a short value in network byte ordering format
+            .sin_port = htons(FT_ET_PROXY_PORT),
+            // htonl: host to network long: same as htons but to long
+            .sin_addr.s_addr = htonl(INADDR_ANY)
+        };
         // bind it to listen to the incoming connections on the created server
         // address, will return -1 on error
         if ((bind(listen_sock, (struct sockaddr*)&server_address,
             sizeof(server_address))) < 0) {
-            printf("could not bind socket\n");
-            return 1;
+            close(listen_sock);
+            Log::Write(Log::Level::Error, "could not bind socket");
+            return false;
         }
 
-        int wait_size = 16;  // maximum number of waiting clients, after which
+        constexpr const int wait_size = 16;  // maximum number of waiting clients, after which
         // dropping begins
         if (listen(listen_sock, wait_size) < 0) {
-            printf("could not open socket for listening\n");
-            return 1;
+            close(listen_sock);
+            Log::Write(Log::Level::Error, "could not open socket for listening");
+            return false;
         }
 
-        // socket address used to store client address
-        struct sockaddr_in client_address;
-        socklen_t client_address_len = 0;
-
-        proxy_timeout.tv_sec = 0;
-        proxy_timeout.tv_usec = 20000;
-
-        FD_ZERO(&rset);
-
-
-        proxy_fd = 0;
-        proxy_rset = rset;
+        FD_ZERO(&proxy_rset);
+        proxy_fd = SOCKET_NULL_HANDLE;
         proxy_listen_sock = listen_sock;
+
+        CHECK(proxy_listen_sock != SOCKET_NULL_HANDLE);
 
         Log::Write(Log::Level::Info, "Facial/Eye Tracking Proxy server created.");
 #endif
@@ -1365,10 +1357,15 @@ struct OpenXrProgram final : IOpenXrProgram {
         }
 
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
-
+        
         faceTracker_ = XR_NULL_HANDLE;
-        XrFaceTrackerCreateInfoFB createInfo{ XR_TYPE_FACE_TRACKER_CREATE_INFO_FB };
-        m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTracker_);
+        constexpr const XrFaceTrackerCreateInfoFB createInfo {
+            .type = XR_TYPE_FACE_TRACKER_CREATE_INFO_FB,
+            .next = nullptr,
+            .faceExpressionSet = XR_FACE_EXPRESSSION_SET_DEFAULT_FB
+        };
+        CHECK_XRCMD(m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTracker_));
+        CHECK(faceTracker_ != XR_NULL_HANDLE);
 #endif
         return true;
     }
@@ -2010,8 +2007,6 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         PollStreamConfigEvents();
 
-        PollFaceEyeTracking();
-
         // Process all pending messages.
         while (const XrEventDataBaseHeader* event = TryReadNextEvent()) {
             switch (event->type) {
@@ -2308,6 +2303,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         CHECK_XRCMD(xrWaitFrame(m_session, &frameWaitInfo, &frameState));
         m_PredicatedLatencyOffset.store(frameState.predictedDisplayPeriod);
         m_lastPredicatedDisplayTime.store(frameState.predictedDisplayTime);
+
+        PollFaceEyeTracking(frameState.predictedDisplayTime);
 
         const auto renderMode = m_renderMode.load();
         const bool isVideoStream = renderMode == RenderMode::VideoStream;
@@ -2997,96 +2994,100 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
 #ifdef XR_USE_OXR_OCULUS
-    //XrFaceExpressionInfoFB exinfo;
-    //XrFaceExpressionWeightsV2FB exweights;
-    //#define num_ft_pars 72
-
-    XrFaceExpressionWeightsFB expressionWeights{ XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB };
     float weights_[XR_FACE_EXPRESSION_COUNT_FB] = {};
     float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
-    XrFaceExpressionInfoFB expressionInfo{ XR_TYPE_FACE_EXPRESSION_INFO_FB };
-    XrTime last_time;
-    bool swch = false;
-    //int fc=0; // hack cause last time dont work
-    //bool fsw = false;
-
-    int face_buffer_size = XR_FACE_EXPRESSION_COUNT_FB * 4;
-
-    int face_buffer_offset1 = face_buffer_size;
-    int face_buffer_offset2 = face_buffer_offset1 + (8 * 4);
-
-    int tracking_buffer_size = (XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4);
-
-    char ft_et_buffer[(XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4)];
-
-    XrEyeGazesFB eyeGazes{ XR_TYPE_EYE_GAZES_FB };
-    XrEyeGazesInfoFB gazesInfo{ XR_TYPE_EYE_GAZES_INFO_FB };
+    
+    constexpr static const std::size_t TrackingBufferSize = (XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4);    
+    char ft_et_buffer[TrackingBufferSize] = {};
 #endif
 
-    void PollFaceEyeTracking()
+    void PollFaceEyeTracking(const XrTime& ptime)
     {
 #ifdef XR_USE_OXR_OCULUS
         if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE)
             return;
 
-        expressionWeights.next = nullptr;
-        expressionWeights.weights = weights_;
-
-        expressionWeights.confidences = confidence_;
-        expressionWeights.weightCount = XR_FACE_EXPRESSION_COUNT_FB;
-        expressionWeights.confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB;
-
 #ifdef XR_USE_PLATFORM_ANDROID
-        if (proxy_fd == 0) {
-            Log::Write(Log::Level::Info, "ProxyFD is 0, accpeting con");
-            //FD_ZERO(&proxy_rset);
+        if (proxy_listen_sock != SOCKET_NULL_HANDLE && proxy_fd == SOCKET_NULL_HANDLE) {
+            Log::Write(Log::Level::Verbose, Fmt("ProxyFD is %d, accpeting connection", proxy_listen_sock));
+
             FD_SET(proxy_listen_sock, &proxy_rset);
-
+            struct timeval proxy_timeout { .tv_sec = 0, .tv_usec = 20000 };
             // select the ready descriptor
-            int nready = select(proxy_listen_sock + 1, &proxy_rset, NULL, NULL, &proxy_timeout);
+            const int nready = select(proxy_listen_sock + 1, &proxy_rset, NULL, NULL, &proxy_timeout);
 
-            Log::Write(Log::Level::Info, Fmt("ProxyFD is 0, accpeting con %i", nready));
+            Log::Write(Log::Level::Verbose, Fmt("ProxyFD is %d, accpeting connection state: %d", proxy_listen_sock, nready));
 
             // if tcp socket is readable then handle
             // it by accepting the connection
             if (FD_ISSET(proxy_listen_sock, &proxy_rset)) {
-                Log::Write(Log::Level::Info, "ready to accept!");
+                Log::Write(Log::Level::Info, "ProxyFD: Ready to accept!");
                 struct sockaddr_in client_address;
                 socklen_t client_address_len = 0;
-                int sock = accept(proxy_listen_sock, (struct sockaddr*)&client_address, &client_address_len);
+                const int sock = accept(proxy_listen_sock, (struct sockaddr*)&client_address, &client_address_len);
                 if (sock < 0) {
-                    Log::Write(Log::Level::Info, "could not open a socket to accept data");
+                    proxy_fd = SOCKET_NULL_HANDLE;
+                    Log::Write(Log::Level::Info, "ProxyFD: could not open a socket to accept data");
                 }
                 else {
-                    Log::Write(Log::Level::Info, "Received connection!");
+                    Log::Write(Log::Level::Info, Fmt("ProxyFD: Received connection! ProxyClientFD: %d", sock));
                     proxy_fd = sock;
+                    assert(proxy_fd != SOCKET_NULL_HANDLE);
                 }
             }
         }
 #endif
+        const XrEyeGazesInfoFB gazesInfo{
+            .type = XR_TYPE_EYE_GAZES_INFO_FB,
+            .next = nullptr,
+            .baseSpace = m_appSpace,
+            .time = ptime
+        };
+        XrEyeGazesFB eyeGazes{
+            .type = XR_TYPE_EYE_GAZES_FB,
+            .next = nullptr
+        };
+        assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+        CHECK_XRCMD(m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes));
 
-        swch = !swch;
-        if (swch) {
-            eyeGazes.next = nullptr;
-            gazesInfo.baseSpace = m_appSpace;
-            
-            assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-            m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
-            
-            assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-            m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
-            
+        const XrFaceExpressionInfoFB expressionInfo{
+            .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
+            .next = nullptr,
+            .time = ptime
+        };
+        XrFaceExpressionWeightsFB expressionWeights{
+            .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
+            .next = nullptr,
+            .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
+            .weights = weights_,
+            .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
+            .confidences = confidence_
+        };
+        assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+        CHECK_XRCMD(m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights));
+
+        //if (expressionWeights.status.isValid == XR_TRUE) {
+        //    // If this is not true then eye tracking permissions have not been accepted.
+        //    CHECK(expressionWeights.status.isEyeFollowingBlendshapesValid == XR_TRUE);
+        //}
+
 #ifdef XR_USE_PLATFORM_ANDROID
-            if (proxy_fd != 0) {
-                memcpy(ft_et_buffer, weights_, face_buffer_size);
-                memcpy(ft_et_buffer + face_buffer_offset1, &eyeGazes.gaze[0].isValid, 4);
-                memcpy(ft_et_buffer + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
-                memcpy(ft_et_buffer + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
-                memcpy(ft_et_buffer + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
-                write(proxy_fd, ft_et_buffer, tracking_buffer_size);
-            }
-#endif
+        if (proxy_fd != SOCKET_NULL_HANDLE) {
+            constexpr static const std::size_t face_buffer_size = XR_FACE_EXPRESSION_COUNT_FB * 4;
+            constexpr static const std::size_t face_buffer_offset1 = face_buffer_size;
+            constexpr static const std::size_t face_buffer_offset2 = face_buffer_offset1 + (8 * 4);
+
+            static_assert(sizeof(eyeGazes.gaze[0].isValid) == 4);
+            static_assert(sizeof(eyeGazes.gaze[0].gazePose) == (7 * 4));
+
+            memcpy(ft_et_buffer, weights_, face_buffer_size);
+            memcpy(ft_et_buffer + face_buffer_offset1, &eyeGazes.gaze[0].isValid, 4);
+            memcpy(ft_et_buffer + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
+            memcpy(ft_et_buffer + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
+            memcpy(ft_et_buffer + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
+            write(proxy_fd, ft_et_buffer, TrackingBufferSize);
         }
+#endif
 #endif
     }
 
