@@ -729,7 +729,7 @@ else()
     set(BUILD_TYPE_DIR Release)
 endif()
 if (USE_OCULUS_MOBILE_LOADER AND ANDROID)
-    message(STATUS "Using Oculus Mobile OpenXR Loader.")
+    message(NOTICE "Using Oculus Mobile OpenXR Loader.")
     add_library(openxr_loader SHARED IMPORTED)
     set_property(
             TARGET
