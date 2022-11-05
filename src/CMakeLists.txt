@@ -702,7 +702,7 @@ else()
     set(BUILD_TYPE_DIR Release)
 endif()
 if (USE_OCULUS_MOBILE_LOADER AND ANDROID)
-    message(STATUS "Using Oculus Mobile OpenXR Loader.")
+    message(NOTICE "Using Oculus Mobile OpenXR Loader.")
     add_library(openxr_loader SHARED IMPORTED)
     set_property(
             TARGET
@@ -720,7 +720,7 @@ if (USE_OCULUS_MOBILE_LOADER AND ANDROID)
     )
     add_definitions(-DXR_USE_OXR_OCULUS)
 elseif (USE_PICO_MOBILE_LOADER AND ANDROID)
-    message(STATUS "Using Pico Neo (3) Mobile OpenXR Loader.")
+    message(NOTICE "Using Pico Neo (3) Mobile OpenXR Loader.")
     set(PICO_OPENXR_MOBILE_SDK ${PROJECT_SOURCE_DIR}/src/external/pico-neo/OpenXR)
     add_library(openxr_loader SHARED IMPORTED)
     set_property(
