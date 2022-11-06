@@ -67,6 +67,7 @@ struct Options {
     bool DisableSuggestedBindings = false;
     bool NoServerFramerateLock = false;
     bool NoFrameSkip = false;
+    bool DisableLocalDimming = false;
 
     struct {
         XrFormFactor FormFactor{XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY};

@@ -335,16 +335,32 @@ constexpr inline XrHandJointEXT ToXRHandJointType(const ALVR_HAND h)
     }
 }
 
+#ifdef XR_USE_OXR_OCULUS
+constexpr inline auto make_local_dimming_info(const bool enabled) {
+    return XrLocalDimmingFrameEndInfoMETA{
+        .type = XR_TYPE_FRAME_END_INFO_LOCAL_DIMMING_META,
+        .next = nullptr,
+        .localDimmingMode = enabled ? XR_LOCAL_DIMMING_MODE_ON_META : XR_LOCAL_DIMMING_MODE_OFF_META
+    };
+}
+#endif
+
 struct OpenXrProgram final : IOpenXrProgram {
     OpenXrProgram(const std::shared_ptr<Options>& options, const std::shared_ptr<IPlatformPlugin>& platformPlugin,
         const std::shared_ptr<IGraphicsPlugin>& graphicsPlugin)
         : m_options(options), m_platformPlugin(platformPlugin), m_graphicsPlugin(graphicsPlugin)
+#ifdef XR_USE_OXR_OCULUS
+        , xrLocalDimmingFrameEndInfoMETA(make_local_dimming_info(!options->DisableLocalDimming))
+#endif
     {
         LogLayersAndExtensions();
     }
 
     OpenXrProgram(const std::shared_ptr<Options>& options, const std::shared_ptr<IPlatformPlugin>& platformPlugin)
         : m_options(options), m_platformPlugin(platformPlugin), m_graphicsPlugin{ nullptr }
+#ifdef XR_USE_OXR_OCULUS
+        , xrLocalDimmingFrameEndInfoMETA(make_local_dimming_info(!options->DisableLocalDimming))
+#endif
     {
         LogLayersAndExtensions();
         auto& graphicsApi = options->GraphicsPlugin;
@@ -519,6 +535,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         //{ XR_FB_TOUCH_CONTROLLER_EXTRAS_EXTENSION_NAME, false },
         { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME, false },
         { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
+        { XR_META_LOCAL_DIMMING_EXTENSION_NAME, false },
 #endif
 #ifdef XR_USE_OXR_PICO
 #pragma message ("Pico Neo 3 OXR Extensions Enabled.")
@@ -2115,7 +2132,9 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
         const XrFrameEndInfo frameEndInfo{
             .type = XR_TYPE_FRAME_END_INFO,
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_OCULUS
+            .next = &xrLocalDimmingFrameEndInfoMETA,
+#elif defined(XR_USE_OXR_PICO)
             .next = &xrFrameEndInfoEXT,
 #else
             .next = nullptr,
@@ -3069,6 +3088,9 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrStartCVControllerThreadPico m_pfnStartCVControllerThreadPico = nullptr;
     PFN_xrStopCVControllerThreadPico  m_pfnStopCVControllerThreadPico = nullptr;
     PFN_xrVibrateControllerPico m_pfnXrVibrateControllerPico = nullptr;
+#endif
+#ifdef XR_USE_OXR_OCULUS
+    const XrLocalDimmingFrameEndInfoMETA xrLocalDimmingFrameEndInfoMETA;
 #endif
 
     std::atomic<XrTime>      m_lastPredicatedDisplayTime{ 0 };

@@ -114,6 +114,7 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
         options->DisableSuggestedBindings = ctx.noSuggestedBindings;
         options->NoServerFramerateLock = ctx.noServerFramerateLock;
         options->NoFrameSkip = ctx.noFrameSkip;
+        options->DisableLocalDimming = ctx.disableLocalDimming;
         if (options->GraphicsPlugin.empty())
             options->GraphicsPlugin = graphics_api_str(ctx.graphicsApi);
 

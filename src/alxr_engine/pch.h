@@ -114,6 +114,7 @@
 #include <openxr/fb_touch_controller_pro.h>
 #include <openxr/fb_eye_tracking_social.h>
 #include <openxr/fb_face_tracking.h>
+#include <openxr/meta_local_dimming.h>
 #endif
 #ifdef XR_USE_OXR_PICO
 #include <openxr/openxr_pico.h>
