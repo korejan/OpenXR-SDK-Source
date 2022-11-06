@@ -3088,6 +3088,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             write(proxy_fd, ft_et_buffer, TrackingBufferSize);
         }
 #endif
+#else
+        (void)ptime;
 #endif
     }
 
