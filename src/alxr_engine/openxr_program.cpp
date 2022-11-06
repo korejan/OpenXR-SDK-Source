@@ -3050,7 +3050,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         const XrEyeGazesInfoFB gazesInfo{
             .type = XR_TYPE_EYE_GAZES_INFO_FB,
             .next = nullptr,
-            .baseSpace = m_appSpace,
+            .baseSpace = m_viewSpace,
             .time = ptime
         };
         XrEyeGazesFB eyeGazes{
