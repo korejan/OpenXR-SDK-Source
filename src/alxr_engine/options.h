@@ -63,6 +63,7 @@ struct Options {
 
     std::string AppSpace{"Stage"};
 
+    XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_REC2020_FB;
     bool DisableLinearizeSrgb=false;
     bool DisableSuggestedBindings = false;
     bool NoServerFramerateLock = false;

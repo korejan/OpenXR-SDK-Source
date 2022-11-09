@@ -1076,30 +1076,37 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_pfnSetColorSpaceFB == nullptr)
             return false;
 
-        //constexpr const auto to_string = [](const XrColorSpaceFB csType)
-        //{
-        //    switch (csType)
-        //    {
-        //    case XR_COLOR_SPACE_UNMANAGED_FB: return "UNMANAGED";
-        //    case XR_COLOR_SPACE_REC2020_FB: return "REC2020";
-        //    case XR_COLOR_SPACE_REC709_FB: return "REC709";
-        //    case XR_COLOR_SPACE_RIFT_CV1_FB: return "RIFT_CV1";
-        //    case XR_COLOR_SPACE_RIFT_S_FB: return "RIFT_S";
-        //    case XR_COLOR_SPACE_QUEST_FB: return "QUEST";
-        //    case XR_COLOR_SPACE_P3_FB: return "P3";
-        //    case XR_COLOR_SPACE_ADOBE_RGB_FB: return "ADOBE_RGB";
-        //    }
-        //    return "unknown-color-space-type";
-        //};
+        constexpr const auto to_string = [](const XrColorSpaceFB csType)
+        {
+            switch (csType)
+            {
+            case XR_COLOR_SPACE_UNMANAGED_FB: return "UNMANAGED";
+            case XR_COLOR_SPACE_REC2020_FB: return "REC2020";
+            case XR_COLOR_SPACE_REC709_FB: return "REC709";
+            case XR_COLOR_SPACE_RIFT_CV1_FB: return "RIFT_CV1";
+            case XR_COLOR_SPACE_RIFT_S_FB: return "RIFT_S";
+            case XR_COLOR_SPACE_QUEST_FB: return "QUEST";
+            case XR_COLOR_SPACE_P3_FB: return "P3";
+            case XR_COLOR_SPACE_ADOBE_RGB_FB: return "ADOBE_RGB";
+            }
+            return "unknown-color-space-type";
+        };
 
-        //uint32_t colorSpaceCount = 0;
+        //std::uint32_t colorSpaceCount = 0;
         //CHECK_XRCMD(m_pfnEnumerateColorSpacesFB(m_session, 0, &colorSpaceCount, nullptr));
 
         //std::vector<XrColorSpaceFB> colorSpaceTypes{ colorSpaceCount, XR_COLOR_SPACE_UNMANAGED_FB };
         //CHECK_XRCMD(m_pfnEnumerateColorSpacesFB(m_session, colorSpaceCount, &colorSpaceCount, colorSpaceTypes.data()));
 
-        CHECK_XRCMD(m_pfnSetColorSpaceFB(m_session, XR_COLOR_SPACE_REC2020_FB));
-        Log::Write(Log::Level::Info, "Color space set.");
+        const XrColorSpaceFB selectedColorSpace = m_options ?
+            m_options->DisplayColorSpace : XR_COLOR_SPACE_REC2020_FB;
+        const auto colorSpaceName = to_string(selectedColorSpace);
+
+        if (m_pfnSetColorSpaceFB(m_session, selectedColorSpace) != XR_SUCCESS) {
+            Log::Write(Log::Level::Warning, Fmt("Failed to set display colour space to \"%s\"", colorSpaceName));
+            return false;
+        }
+        Log::Write(Log::Level::Info, Fmt("Color space set successefully set to \"%s\"", colorSpaceName));
         return true;
     }
 

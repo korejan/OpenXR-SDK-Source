@@ -45,6 +45,19 @@ enum ALXRCodecType
     HEVC_CODEC
 };
 
+// replicates https://registry.khronos.org/OpenXR/specs/1.0/html/xrspec.html#XR_FB_color_space
+enum ALXRColorSpace {
+    Unmanaged = 0,
+    Rec2020 = 1,
+    Rec709 = 2,
+    RiftCV1 = 3,
+    RiftS = 4,
+    Quest = 5,
+    P3 = 6,
+    AdobeRgb = 7,
+    MaxEnum = 0x7fffffff
+};
+
 struct ALXRSystemProperties
 {
     char         systemName[256];
@@ -74,6 +87,7 @@ struct ALXRRustCtx
 
     ALXRGraphicsApi graphicsApi;
     ALXRDecoderType decoderType;
+    ALXRColorSpace  displayColorSpace;
 
     bool verbose;
     bool disableLinearizeSrgb;
