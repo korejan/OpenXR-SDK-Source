@@ -1076,7 +1076,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_pfnSetColorSpaceFB == nullptr)
             return false;
 
-        constexpr const auto to_string = [](const XrColorSpaceFB csType)
+        constexpr const auto to_string = [](const XrColorSpaceFB csType) -> const char*
         {
             switch (csType)
             {
