@@ -1203,7 +1203,9 @@ struct OpenXrProgram final : IOpenXrProgram {
             // ordering format to a short value in network byte ordering format
             .sin_port = htons(FT_ET_PROXY_PORT),
             // htonl: host to network long: same as htons but to long
-            .sin_addr.s_addr = htonl(INADDR_ANY)
+            .sin_addr {
+                .s_addr = htonl(INADDR_ANY)
+            }
         };
         // bind it to listen to the incoming connections on the created server
         // address, will return -1 on error
@@ -2732,13 +2734,64 @@ struct OpenXrProgram final : IOpenXrProgram {
     
     constexpr static const std::size_t TrackingBufferSize = (XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4);    
     char ft_et_buffer[TrackingBufferSize] = {};
+
+#ifdef XR_USE_PLATFORM_ANDROID
+    bool HandshakeFaceEyeTracking(const int sock, const XrFaceExpressionWeightsFB& expressionWeights) {
+        assert(sock != SOCKET_NULL_HANDLE);
+        const std::int32_t version = 1;
+        const std::int32_t meta_size = static_cast<std::int32_t>(TrackingBufferSize); // this will be dynamic in the future, for now make it the same size as the tracking buffer for backwards compatibility (prevent stream becoming misaligned if the client doesnt support handshake)
+        const std::int32_t is_eye_following_blendshapes_valid = expressionWeights.status.isEyeFollowingBlendshapesValid ? 1 : 0;
+        const std::int32_t eye_enabled = (eyeTracker_ != XR_NULL_HANDLE) ? 1 : 0;
+        const std::int32_t face_enabled = (faceTracker_ != XR_NULL_HANDLE) ? 1 : 0;
+
+        // hack (see meta_size comment)
+        memcpy(ft_et_buffer, &version, sizeof(version));
+        static_assert(sizeof(m_systemId) == sizeof(std::uint64_t));
+        memcpy(ft_et_buffer + 4, &m_systemId, sizeof(m_systemId));
+        memcpy(ft_et_buffer + 12, &meta_size, sizeof(meta_size));
+        memcpy(ft_et_buffer + 16, &is_eye_following_blendshapes_valid, sizeof(is_eye_following_blendshapes_valid));
+        memcpy(ft_et_buffer + 20, &eye_enabled, sizeof(eye_enabled));
+        memcpy(ft_et_buffer + 24, &face_enabled, sizeof(face_enabled));
+
+        return write(sock, ft_et_buffer, TrackingBufferSize) != -1; // todo: require valid response
+    }
+#endif
 #endif
 
     void PollFaceEyeTracking(const XrTime& ptime)
     {
 #ifdef XR_USE_OXR_OCULUS
-        if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE)
+        if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE || ptime == 0)
             return;
+
+        const XrFaceExpressionInfoFB expressionInfo{
+            .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
+            .next = nullptr,
+            .time = ptime
+        };
+        XrFaceExpressionWeightsFB expressionWeights{
+            .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
+            .next = nullptr,
+            .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
+            .weights = weights_,
+            .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
+            .confidences = confidence_
+        };
+        assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+        m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
+
+        const XrEyeGazesInfoFB gazesInfo{
+            .type = XR_TYPE_EYE_GAZES_INFO_FB,
+            .next = nullptr,
+            .baseSpace = m_viewSpace,
+            .time = ptime
+        };
+        XrEyeGazesFB eyeGazes{
+            .type = XR_TYPE_EYE_GAZES_FB,
+            .next = nullptr
+        };
+        assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+        m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
 
 #ifdef XR_USE_PLATFORM_ANDROID
         if (proxy_listen_sock != SOCKET_NULL_HANDLE && proxy_fd == SOCKET_NULL_HANDLE) {
@@ -2764,47 +2817,20 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
                 else {
                     Log::Write(Log::Level::Info, Fmt("ProxyFD: Received connection! ProxyClientFD: %d", sock));
-                    proxy_fd = sock;
-                    assert(proxy_fd != SOCKET_NULL_HANDLE);
+                    if (HandshakeFaceEyeTracking(sock, expressionWeights)) {
+                        Log::Write(Log::Level::Info, Fmt("ProxyFD: HandshakeFaceEyeTracking successful"));
+                        proxy_fd = sock;
+                        assert(proxy_fd != SOCKET_NULL_HANDLE);
+                    }
+                    else {
+                        Log::Write(Log::Level::Warning, Fmt("ProxyFD: HandshakeFaceEyeTracking failed, closing connection."));
+                        close(sock);
+                        proxy_fd = SOCKET_NULL_HANDLE;
+                    }
                 }
             }
         }
-#endif
-        const XrEyeGazesInfoFB gazesInfo{
-            .type = XR_TYPE_EYE_GAZES_INFO_FB,
-            .next = nullptr,
-            .baseSpace = m_viewSpace,
-            .time = ptime
-        };
-        XrEyeGazesFB eyeGazes{
-            .type = XR_TYPE_EYE_GAZES_FB,
-            .next = nullptr
-        };
-        assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-        CHECK_XRCMD(m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes));
 
-        const XrFaceExpressionInfoFB expressionInfo{
-            .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
-            .next = nullptr,
-            .time = ptime
-        };
-        XrFaceExpressionWeightsFB expressionWeights{
-            .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
-            .next = nullptr,
-            .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
-            .weights = weights_,
-            .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
-            .confidences = confidence_
-        };
-        assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-        CHECK_XRCMD(m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights));
-
-        //if (expressionWeights.status.isValid == XR_TRUE) {
-        //    // If this is not true then eye tracking permissions have not been accepted.
-        //    CHECK(expressionWeights.status.isEyeFollowingBlendshapesValid == XR_TRUE);
-        //}
-
-#ifdef XR_USE_PLATFORM_ANDROID
         if (proxy_fd != SOCKET_NULL_HANDLE) {
             constexpr static const std::size_t face_buffer_size = XR_FACE_EXPRESSION_COUNT_FB * 4;
             constexpr static const std::size_t face_buffer_offset1 = face_buffer_size;
@@ -2818,7 +2844,10 @@ struct OpenXrProgram final : IOpenXrProgram {
             memcpy(ft_et_buffer + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
             memcpy(ft_et_buffer + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
             memcpy(ft_et_buffer + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
-            write(proxy_fd, ft_et_buffer, TrackingBufferSize);
+            if (-1 == write(proxy_fd, ft_et_buffer, TrackingBufferSize)) {
+                close(proxy_fd);
+                proxy_fd = SOCKET_NULL_HANDLE;
+            }
         }
 #endif
 #else
