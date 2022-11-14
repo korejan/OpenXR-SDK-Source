@@ -143,6 +143,9 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
             };
             initializeLoader((const XrLoaderInitInfoBaseHeaderKHR *) &loaderInitInfoAndroid);
         }
+        else {
+            Log::Write(Log::Level::Error, "Failed to initialize android loader!");
+        }
 
         //av_jni_set_java_vm(ctx.applicationVM, nullptr);
 #endif
