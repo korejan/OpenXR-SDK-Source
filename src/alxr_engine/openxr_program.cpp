@@ -36,16 +36,7 @@
 #endif
 
 #ifdef XR_USE_OXR_OCULUS
-#ifdef XR_USE_PLATFORM_ANDROID
-    #include <errno.h>
-    #include <signal.h>
-    #include <unistd.h>
-    #include <arpa/inet.h>
-    #include <netinet/in.h>
-    #include <netinet/tcp.h>
-    #include <sys/socket.h>
-    #include <sys/types.h>
-#endif
+    #include "vrcft_proxy_server.h"
 #endif
 
 #include "xr_utils.h"
@@ -466,18 +457,11 @@ struct OpenXrProgram final : IOpenXrProgram {
             m_xrDestroyFaceTrackerFB_(faceTracker_);
         }
 
-#ifdef XR_USE_PLATFORM_ANDROID
-        if (proxy_fd != SOCKET_NULL_HANDLE) {
-            Log::Write(Log::Level::Verbose, "Closing Proxy Client Connection");
-            close(proxy_fd);
-            proxy_fd = SOCKET_NULL_HANDLE;
-        }
-        if (proxy_listen_sock != SOCKET_NULL_HANDLE) {
+        if (m_vrcftProxyServer != nullptr) {
             Log::Write(Log::Level::Verbose, "Shutting Down Proxy Server");
-            close(proxy_listen_sock);
-            proxy_listen_sock = SOCKET_NULL_HANDLE;
+            m_vrcftProxyServer->Close();
+            m_vrcftProxyServer.reset();
         }
-#endif
 #endif
         m_interactionManager.reset();
 
@@ -1260,68 +1244,19 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
     PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
 
-#ifdef XR_USE_PLATFORM_ANDROID
-    constexpr static const int SOCKET_NULL_HANDLE = -1;
-    fd_set proxy_rset{};
-    int proxy_listen_sock = SOCKET_NULL_HANDLE;
-    int proxy_fd = SOCKET_NULL_HANDLE;
-#endif
+    std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
+    bool m_sendVRCFTHandShakeMsg = true;
 #endif
     bool InitializeProxyServer()
     {
-#if defined(XR_USE_PLATFORM_ANDROID) && defined(XR_USE_OXR_OCULUS)
+#ifdef XR_USE_OXR_OCULUS
         if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE) {
-            Log::Write(Log::Level::Warning, "Facial/Eye Tracking not enabled, a proxy server not created.");
+            Log::Write(Log::Level::Warning, "Facial & Eye Tracking not enabled, a VRCFT proxy server not created.");
             return false;
         }
-        
-        // create a TCP socket, creation returns -1 on failure
-        int listen_sock = SOCKET_NULL_HANDLE;
-        if ((listen_sock = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-            Log::Write(Log::Level::Error, "could not create listen socket");
-            return false;
-        }
-
-        int flag = 1;
-        if (setsockopt(listen_sock, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
-            Log::Write(Log::Level::Warning, "Failed to set TCP_NODELAY flag.");
-        }
-
-        // socket address used for the server
-        struct sockaddr_in server_address {
-            .sin_family = AF_INET,
-            // htons: host to network short: transforms a value in host byte
-            // ordering format to a short value in network byte ordering format
-            .sin_port = htons(FT_ET_PROXY_PORT),
-            // htonl: host to network long: same as htons but to long
-            .sin_addr {
-                .s_addr = htonl(INADDR_ANY)
-            }
-        };
-        // bind it to listen to the incoming connections on the created server
-        // address, will return -1 on error
-        if ((bind(listen_sock, (struct sockaddr*)&server_address,
-            sizeof(server_address))) < 0) {
-            close(listen_sock);
-            Log::Write(Log::Level::Error, "could not bind socket");
-            return false;
-        }
-
-        constexpr const int wait_size = 16;  // maximum number of waiting clients, after which
-        // dropping begins
-        if (listen(listen_sock, wait_size) < 0) {
-            close(listen_sock);
-            Log::Write(Log::Level::Error, "could not open socket for listening");
-            return false;
-        }
-
-        FD_ZERO(&proxy_rset);
-        proxy_fd = SOCKET_NULL_HANDLE;
-        proxy_listen_sock = listen_sock;
-
-        CHECK(proxy_listen_sock != SOCKET_NULL_HANDLE);
-
-        Log::Write(Log::Level::Info, "Facial/Eye Tracking Proxy server created.");
+        m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
+        assert(m_vrcftProxyServer != nullptr);
+        m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
 #endif
         return true;
     }
@@ -3010,11 +2945,10 @@ struct OpenXrProgram final : IOpenXrProgram {
     float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
     
     constexpr static const std::size_t TrackingBufferSize = (XR_FACE_EXPRESSION_COUNT_FB * 4) + (8 * 2 * 4);    
-    char ft_et_buffer[TrackingBufferSize] = {};
+    std::array<std::uint8_t,TrackingBufferSize>  ft_et_buffer {};
 
-#ifdef XR_USE_PLATFORM_ANDROID
-    bool HandshakeFaceEyeTracking(const int sock, const XrFaceExpressionWeightsFB& expressionWeights) {
-        assert(sock != SOCKET_NULL_HANDLE);
+    bool HandshakeFaceEyeTracking(const XrFaceExpressionWeightsFB& expressionWeights) {
+        assert(m_vrcftProxyServer != nullptr);
         const std::int32_t version = 1;
         const std::int32_t meta_size = static_cast<std::int32_t>(TrackingBufferSize); // this will be dynamic in the future, for now make it the same size as the tracking buffer for backwards compatibility (prevent stream becoming misaligned if the client doesnt support handshake)
         const std::int32_t is_eye_following_blendshapes_valid = expressionWeights.status.isEyeFollowingBlendshapesValid ? 1 : 0;
@@ -3022,19 +2956,18 @@ struct OpenXrProgram final : IOpenXrProgram {
         const std::int32_t face_enabled = (faceTracker_ != XR_NULL_HANDLE) ? 1 : 0;
 
         // hack (see meta_size comment)
-        memcpy(ft_et_buffer, &version, sizeof(version));
+        const auto ft_et_buf = ft_et_buffer.data();
+        memcpy(ft_et_buf, &version, sizeof(version));
         static_assert(sizeof(m_systemId) == sizeof(std::uint64_t));
-        memcpy(ft_et_buffer + 4, &m_systemId, sizeof(m_systemId));
-        memcpy(ft_et_buffer + 12, &meta_size, sizeof(meta_size));
-        memcpy(ft_et_buffer + 16, &is_eye_following_blendshapes_valid, sizeof(is_eye_following_blendshapes_valid));
-        memcpy(ft_et_buffer + 20, &eye_enabled, sizeof(eye_enabled));
-        memcpy(ft_et_buffer + 24, &face_enabled, sizeof(face_enabled));
-
-        return write(sock, ft_et_buffer, TrackingBufferSize) != -1; // todo: require valid response
+        memcpy(ft_et_buf + 4, &m_systemId, sizeof(m_systemId));
+        memcpy(ft_et_buf + 12, &meta_size, sizeof(meta_size));
+        memcpy(ft_et_buf + 16, &is_eye_following_blendshapes_valid, sizeof(is_eye_following_blendshapes_valid));
+        memcpy(ft_et_buf + 20, &eye_enabled, sizeof(eye_enabled));
+        memcpy(ft_et_buf + 24, &face_enabled, sizeof(face_enabled));
+        return m_vrcftProxyServer->Send(ft_et_buffer);
     }
 #endif
-#endif
-
+    
     void PollFaceEyeTracking(const XrTime& ptime)
     {
 #ifdef XR_USE_OXR_OCULUS
@@ -3070,45 +3003,15 @@ struct OpenXrProgram final : IOpenXrProgram {
         assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
         m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
 
-#ifdef XR_USE_PLATFORM_ANDROID
-        if (proxy_listen_sock != SOCKET_NULL_HANDLE && proxy_fd == SOCKET_NULL_HANDLE) {
-            Log::Write(Log::Level::Verbose, Fmt("ProxyFD is %d, accpeting connection", proxy_listen_sock));
+        assert(m_vrcftProxyServer != nullptr);
+        m_vrcftProxyServer->PollOne();
+        if (m_vrcftProxyServer->IsConnected()) {
 
-            FD_SET(proxy_listen_sock, &proxy_rset);
-            struct timeval proxy_timeout { .tv_sec = 0, .tv_usec = 20000 };
-            // select the ready descriptor
-            const int nready = select(proxy_listen_sock + 1, &proxy_rset, NULL, NULL, &proxy_timeout);
-
-            Log::Write(Log::Level::Verbose, Fmt("ProxyFD is %d, accpeting connection state: %d", proxy_listen_sock, nready));
-
-            // if tcp socket is readable then handle
-            // it by accepting the connection
-            if (FD_ISSET(proxy_listen_sock, &proxy_rset)) {
-                Log::Write(Log::Level::Info, "ProxyFD: Ready to accept!");
-                struct sockaddr_in client_address;
-                socklen_t client_address_len = 0;
-                const int sock = accept(proxy_listen_sock, (struct sockaddr*)&client_address, &client_address_len);
-                if (sock < 0) {
-                    proxy_fd = SOCKET_NULL_HANDLE;
-                    Log::Write(Log::Level::Info, "ProxyFD: could not open a socket to accept data");
-                }
-                else {
-                    Log::Write(Log::Level::Info, Fmt("ProxyFD: Received connection! ProxyClientFD: %d", sock));
-                    if (HandshakeFaceEyeTracking(sock, expressionWeights)) {
-                        Log::Write(Log::Level::Info, Fmt("ProxyFD: HandshakeFaceEyeTracking successful"));
-                        proxy_fd = sock;
-                        assert(proxy_fd != SOCKET_NULL_HANDLE);
-                    }
-                    else {
-                        Log::Write(Log::Level::Warning, Fmt("ProxyFD: HandshakeFaceEyeTracking failed, closing connection."));
-                        close(sock);
-                        proxy_fd = SOCKET_NULL_HANDLE;
-                    }
-                }
+            if (m_sendVRCFTHandShakeMsg) {
+                const bool result = HandshakeFaceEyeTracking(expressionWeights);
+                Log::Write(Log::Level::Info, Fmt("VRCFTServer: HandshakeFaceEyeTracking message %s", result ? "successfully sent" : "failed to send"));
+                m_sendVRCFTHandShakeMsg = false;
             }
-        }
-
-        if (proxy_fd != SOCKET_NULL_HANDLE) {
             constexpr static const std::size_t face_buffer_size = XR_FACE_EXPRESSION_COUNT_FB * 4;
             constexpr static const std::size_t face_buffer_offset1 = face_buffer_size;
             constexpr static const std::size_t face_buffer_offset2 = face_buffer_offset1 + (8 * 4);
@@ -3116,17 +3019,15 @@ struct OpenXrProgram final : IOpenXrProgram {
             static_assert(sizeof(eyeGazes.gaze[0].isValid) == 4);
             static_assert(sizeof(eyeGazes.gaze[0].gazePose) == (7 * 4));
 
-            memcpy(ft_et_buffer, weights_, face_buffer_size);
-            memcpy(ft_et_buffer + face_buffer_offset1, &eyeGazes.gaze[0].isValid, 4);
-            memcpy(ft_et_buffer + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
-            memcpy(ft_et_buffer + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
-            memcpy(ft_et_buffer + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
-            if (-1 == write(proxy_fd, ft_et_buffer, TrackingBufferSize)) {
-                close(proxy_fd);
-                proxy_fd = SOCKET_NULL_HANDLE;
-            }
+            const auto ft_et_buf = ft_et_buffer.data();
+            memcpy(ft_et_buf, weights_, face_buffer_size);
+            memcpy(ft_et_buf + face_buffer_offset1, &eyeGazes.gaze[0].isValid, 4);
+            memcpy(ft_et_buf + face_buffer_offset1 + 4, &eyeGazes.gaze[0].gazePose, 7 * 4);
+            memcpy(ft_et_buf + face_buffer_offset2, &eyeGazes.gaze[1].isValid, 4);
+            memcpy(ft_et_buf + face_buffer_offset2 + 4, &eyeGazes.gaze[1].gazePose, 7 * 4);
+
+            m_vrcftProxyServer->Send(ft_et_buffer);
         }
-#endif
 #else
         (void)ptime;
 #endif
