@@ -117,7 +117,7 @@ option(
     "Enable exception handling in the loader. Leave this on unless your standard library is built to not throw."
     ON
 )
-option(USE_OCULUS_OXR_EXT_HEADERS "Use the Oculus Mobile OpenXR SDK extension HEADERS only, for e.g. pure (air)link" ON)
+option(USE_OCULUS_OXR_EXT_HEADERS "Use the Oculus Mobile OpenXR SDK extension HEADERS only, for e.g. pure (air)link" OFF)
 option(USE_OCULUS_MOBILE_LOADER "Links to the Oculus Mobile OpenXR SDK to use this loader (BUILD_LOADER will be ignored)" OFF)
 option(USE_PICO_MOBILE_LOADER "Links to the Pico 4/Neo 3 OpenXR SDK (PUI >= 5.2.x) to use this loader (BUILD_LOADER will be ignored)" OFF)
 option(USE_PICO_MOBILE_V4_LOADER "Links to the Pico 4/Neo 3 OpenXR SDK (pre PUI 5.2.x) to use this loader (BUILD_LOADER will be ignored)" OFF)
