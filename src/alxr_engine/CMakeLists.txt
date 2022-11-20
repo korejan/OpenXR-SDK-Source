@@ -68,7 +68,7 @@ else()
         ${D3D_SHADERS})
 endif()
 set_target_properties(alxr_engine PROPERTIES FOLDER ${SAMPLES_FOLDER})
-target_compile_definitions(alxr_engine PRIVATE ALXR_CLIENT)
+target_compile_definitions(alxr_engine PRIVATE ALXR_CLIENT ASIO_STANDALONE)
 if (XR_IS_UWP)
     target_compile_definitions(alxr_engine PRIVATE XR_USE_PLATFORM_UWP)
 endif()
@@ -181,6 +181,7 @@ target_include_directories(alxr_engine
     PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/common
+    ${PROJECT_SOURCE_DIR}/src/external/asio/include
 
     # for OpenXR headers
     ${PROJECT_SOURCE_DIR}/include
@@ -189,7 +190,7 @@ target_include_directories(alxr_engine
 
     # for helper headers
     ${PROJECT_SOURCE_DIR}/external/include
-
+    
     ${ALVR_COMMON_DIR}
     ${ALVR_COMMON_DIR}/../
     ${ALVR_COMMON_DIR}/../app/src/main/cpp
