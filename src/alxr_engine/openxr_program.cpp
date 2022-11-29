@@ -502,7 +502,12 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
         { XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, false },
         { XR_MSFT_UNBOUNDED_REFERENCE_SPACE_EXTENSION_NAME, false },
+
+#ifndef XR_USE_OXR_OCULUS
+        // Quest v46 firmware update added support for this extension which breaks the suggested grip button bindings for touch (pro) profiles...
+        // it is not enough to disable the suggested binding, the extension must be disabled completely.
         { XR_MSFT_HAND_INTERACTION_EXTENSION_NAME, false },
+#endif
         { XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME, false },
         { XR_HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME, false },
         { XR_HTC_HAND_INTERACTION_EXTENSION_NAME, false },
