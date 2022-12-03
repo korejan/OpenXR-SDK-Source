@@ -2735,25 +2735,45 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         InitDeviceUUID();
 
         const std::array<const float, 2> queuePriorities = { 1.0f, 0.0f };
-        VkDeviceQueueCreateInfo queueInfo {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .pNext = nullptr,
-            .queueCount = static_cast<std::uint32_t>(queuePriorities.size()),
-            .pQueuePriorities = queuePriorities.data()
-        };
         uint32_t queueFamilyCount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(m_vkPhysicalDevice, &queueFamilyCount, nullptr);
         std::vector<VkQueueFamilyProperties> queueFamilyProps(queueFamilyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(m_vkPhysicalDevice, &queueFamilyCount, &queueFamilyProps[0]);
 
+        VkDeviceQueueCreateInfo queueInfo[2] {
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .pNext = nullptr,
+                .queueCount = static_cast<std::uint32_t>(queuePriorities.size()),
+                .pQueuePriorities = queuePriorities.data()
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .pNext = nullptr,
+                .queueCount = 1,
+                .pQueuePriorities = queuePriorities.data()+1
+            },
+        };
+ 
         for (uint32_t i = 0; i < queueFamilyCount; ++i) {
             // Only need graphics (not presentation) for draw queue
             if ((queueFamilyProps[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0u) {
-                //if (m_queueFamilyIndex != 0) {
-                m_queueFamilyIndex = queueInfo.queueFamilyIndex = i;
-                //}
+                m_queueFamilyIndex = m_queueFamilyIndexVideoCpy = queueInfo[0].queueFamilyIndex = i;
                 break;
             }
+        }
+
+        std::uint32_t queueInfoCount = 1, cpyQueueIndex = 1;;
+        if (queueFamilyProps[m_queueFamilyIndex].queueCount < 2) // no free queue graphics family, find free queue with transfer flag
+        {
+            for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+                // Only need transfer (not graphics) for video queue
+                if ( i != m_queueFamilyIndex && (queueFamilyProps[i].queueFlags & VK_QUEUE_TRANSFER_BIT) != 0u) {
+                    m_queueFamilyIndexVideoCpy = queueInfo[1].queueFamilyIndex = i;
+                    break;
+                }
+            }
+            queueInfoCount = 2, cpyQueueIndex = 0, queueInfo[0].queueCount = 1;
         }
 
         std::vector<const char*> deviceExtensions =
@@ -2817,8 +2837,8 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         const VkDeviceCreateInfo deviceInfo{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             .pNext = &features2,
-            .queueCreateInfoCount = 1,
-            .pQueueCreateInfos = &queueInfo,
+            .queueCreateInfoCount = queueInfoCount,
+            .pQueueCreateInfos = &queueInfo[0],
             .enabledLayerCount = 0,
             .ppEnabledLayerNames = nullptr,
             .enabledExtensionCount = (uint32_t)deviceExtensions.size(),
@@ -2837,8 +2857,8 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         CHECK_XRCMD(CreateVulkanDeviceKHR(instance, &deviceCreateInfo, &m_vkDevice, &err));
         CHECK_VKCMD(err);
 
-        vkGetDeviceQueue(m_vkDevice, queueInfo.queueFamilyIndex, 0, &m_vkQueue);
-        vkGetDeviceQueue(m_vkDevice, queueInfo.queueFamilyIndex, 1, &m_VideoCpyQueue);
+        vkGetDeviceQueue(m_vkDevice, queueInfo[0].queueFamilyIndex, 0, &m_vkQueue);
+        vkGetDeviceQueue(m_vkDevice, m_queueFamilyIndexVideoCpy, cpyQueueIndex, &m_VideoCpyQueue);
         CHECK(m_VideoCpyQueue != VK_NULL_HANDLE);
 
         m_memAllocator.Init(m_vkPhysicalDevice, m_vkDevice);
@@ -2848,7 +2868,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         m_graphicsBinding.instance = m_vkInstance;
         m_graphicsBinding.physicalDevice = m_vkPhysicalDevice;
         m_graphicsBinding.device = m_vkDevice;
-        m_graphicsBinding.queueFamilyIndex = queueInfo.queueFamilyIndex;
+        m_graphicsBinding.queueFamilyIndex = queueInfo[0].queueFamilyIndex;
         m_graphicsBinding.queueIndex = 0;
 
         SetEnvironmentBlendMode(newMode);
@@ -3034,7 +3054,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             }
         }
 
-        if (!m_videoCpyCmdBuffer.Init(m_vkDevice, m_queueFamilyIndex)) THROW("Failed to create command buffer");
+        if (!m_videoCpyCmdBuffer.Init(m_vkDevice, m_queueFamilyIndexVideoCpy)) THROW("Failed to create command buffer");
 
         m_quadBuffer.Init(m_vkDevice, &m_memAllocator,
             { {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Geometry::QuadVertex, position)},
@@ -4352,6 +4372,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_d3d11vaDeviceCtx{};
 #endif
 
+    uint32_t m_queueFamilyIndexVideoCpy = 0;
     VkQueue m_VideoCpyQueue{ VK_NULL_HANDLE };
 
     VkDescriptorPool m_descriptorPool{ VK_NULL_HANDLE };
