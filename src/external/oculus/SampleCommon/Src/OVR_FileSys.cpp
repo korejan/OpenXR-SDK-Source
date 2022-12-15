@@ -109,7 +109,7 @@ bool ovrFileSys::GetPathIfValidPermission(
 }
 
 #if defined(OVR_OS_WIN32)
-static std::string exeDirAsUri() {
+std::string exeDirAsUri() {
     char path[MAX_PATH];
     if (::GetModuleFileNameA(NULL, path, MAX_PATH) == 0) {
         return std::string();

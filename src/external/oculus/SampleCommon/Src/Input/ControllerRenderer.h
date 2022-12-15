@@ -33,7 +33,10 @@ class ControllerRenderer {
     bool Init(
         bool leftController,
         OVRFW::ovrFileSys* fileSys = nullptr,
-        const char* controllerModelFile = nullptr);
+        const char* controllerModelFile = nullptr,
+        const OVR::Matrix4f& poseCorrection =
+            (OVR::Matrix4f::RotationY(OVR::DegreeToRad(180.0f)) *
+             OVR::Matrix4f::RotationX(OVR::DegreeToRad(-90.0f))));
     void Shutdown();
     void Update(const OVR::Posef& pose);
     void Render(std::vector<ovrDrawSurface>& surfaceList);
@@ -48,6 +51,7 @@ class ControllerRenderer {
     OVR::Vector3f SpecularLightDirection;
     OVR::Vector3f SpecularLightColor;
     OVR::Vector3f AmbientLightColor;
+    OVR::Matrix4f PoseCorrection;
 
    private:
     bool isLeftController;

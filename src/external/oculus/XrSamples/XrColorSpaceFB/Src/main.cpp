@@ -40,7 +40,7 @@ class XrAppBaseApp : public OVRFW::XrApp {
         "the XR device.                                                    \n"
         "\n"
         "For the majority of developers, the recommendation for Meta Quest \n"
-        "devices is to author your content in sRGB (XR_COLOR_SPACE_REC_709)\n"
+        "devices is to author your content in sRGB (XR_COLOR_SPACE_REC709_FB)\n"
         "and leave the color space conversion to the default value (which  \n"
         "is \"XR_COLOR_SPACE_RIFT_CV1_FB\" on Meta Quest 2).               \n"
         "For more details and recommendations for color management, see:   \n"
@@ -259,7 +259,7 @@ class XrAppBaseApp : public OVRFW::XrApp {
 
         OVR::Vector3f chartPose = {0.5, 1.5f, -2.0f};
         ui_.AddLabel(
-            "Color checker authored for sRGB (XR_COLOR_SPACE_REC_709_FB):",
+            "Color checker authored for sRGB (XR_COLOR_SPACE_REC709_FB):",
             {chartPose.x, chartPose.y + 0.65f, chartPose.z},
             {750.0f, 45.0f});
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 # Copyright 2004-present Facebook. All Rights Reserved.
 
 # This script is used for generate XrSample from the beginning by copying over the XrAppBase and
@@ -8,10 +8,28 @@ import errno
 import os
 import shutil
 
+def remove(path):
+    """ param <path> could either be relative or absolute. """
+    if os.path.isfile(path) or os.path.islink(path):
+        os.remove(path)  # remove the file
+    elif os.path.isdir(path):
+        shutil.rmtree(path)  # remove dir and all contains
+    else:
+        raise ValueError("file {} is not a file or dir.".format(path))
+
 
 def CopyDist(src, dst):
     try:
         shutil.copytree(src, dst)
+
+        # delete any files generated after build XrAppBase
+        dstAndroid = os.path.join(dst, "Projects/Android")
+        filesInAndroid = ["AndroidManifest.xml", "buck_build.bat", "buck_build.py",
+            "build.bat", "build.gradle", "build.py", "keystore.properties", "settings.gradle", "jni"]
+
+        for f in os.listdir(dstAndroid):
+            if f not in filesInAndroid :
+                remove(os.path.join(dstAndroid, f))
     except OSError as exc:  # python >2.5
         if exc.errno in (errno.ENOTDIR, errno.EINVAL):
             shutil.copy(src, dst)
@@ -19,18 +37,18 @@ def CopyDist(src, dst):
             raise
 
 
-def BuildXrSample(extName):
-    nameToken = extName.split("_")
-    appName = "".join([x.capitalize() for x in nameToken])
+def BuildXrSample(appName, isPublicApp = True, readyForPublicRelease = True):
     folderName = "Xr" + appName
-
-    targetRootPath = "//arvr/projects/xrruntime/mobile/XrSamples/" + folderName
+    appLocation = "XrSamples"
+    
+    targetRootPath = f"//arvr/projects/xrruntime/mobile/{appLocation}/{folderName}"
     appClass = folderName + "App"
     appTitle = folderName + " Sample"
     packageName = "com.oculus.xrsamples." + folderName.lower()
     targetName = "xrsamples_" + folderName.lower()
 
-    dirname = os.path.dirname(__file__)
+    # use full path here to deal with command like `XrSamples/generate_xr_sample_template.py`
+    dirname = os.path.split(os.path.dirname(os.path.realpath(__file__)))[0] + f"/{appLocation}"
     src = os.path.join(dirname, "XrAppBase")
     dst = os.path.join(dirname, "{}".format(folderName))
     CopyDist(src, dst)
@@ -71,16 +89,22 @@ def BuildXrSample(extName):
 
 
 def main():
-    extName = input(
-        """What is your app's name?
-        Expectation:
-        Input: <name>_<of>_<your>_<app>
-        App Folder: Xr[NameOfYourAPP]
+    appName = input(
+"""
+What is your app's name?
+    Input Example:
+        NameOfYourApp
+    Expectation:
+        App Folder: Xr[NameOfYourApp]
         Target: xrsamples_xr[nameofyourapp]
         Package: com.oculus.xrsamples.xr[nameofyourapp]
-        App Class Name: Xr[NameOfYourApp]App\n"""
+        App Class Name: Xr[NameOfYourApp]App\n
+"""
     )
-    BuildXrSample(extName)
+    isPublicApp = True
+    readyForPublicRelease = True
+    
+    BuildXrSample(appName, isPublicApp, readyForPublicRelease)
 
 
 if __name__ == "__main__":

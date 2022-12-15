@@ -294,7 +294,7 @@ static void ovrEgl_CreateContext(ovrEgl* egl, const ovrEgl* shareEgl) {
     // Do NOT use eglChooseConfig, because the Android EGL code pushes in multisample
     // flags in eglChooseConfig if the user has selected the "force 4x MSAA" option in
     // settings, and that is completely wasted for our warp target.
-    const int MAX_CONFIGS = 1024;
+    enum { MAX_CONFIGS = 1024 };
     EGLConfig configs[MAX_CONFIGS];
     EGLint numConfigs = 0;
     if (eglGetConfigs(egl->Display, configs, MAX_CONFIGS, &numConfigs) == EGL_FALSE) {
@@ -2312,7 +2312,7 @@ static void ovrApp_HandleSessionStateChanges(ovrApp* app, XrSessionState state) 
 }
 
 static void ovrApp_HandleXrEvents(ovrApp* app) {
-    XrEventDataBuffer eventDataBuffer = {};
+    XrEventDataBuffer eventDataBuffer = {0};
 
     // Poll for events
     for (;;) {
@@ -2451,7 +2451,7 @@ static void app_handle_cmd(struct android_app* app, int32_t cmd) {
 }
 
 void UpdateStageBounds(ovrApp* pappState) {
-    XrExtent2Df stageBounds = {};
+    XrExtent2Df stageBounds = {0};
 
     XrResult result;
     OXR(result = xrGetReferenceSpaceBoundsRect(
@@ -2484,9 +2484,7 @@ XrInstance ovrApp_GetInstance() {
 }
 
 static XrActionSet CreateActionSet(int priority, const char* name, const char* localizedName) {
-    XrActionSetCreateInfo asci = {};
-    asci.type = XR_TYPE_ACTION_SET_CREATE_INFO;
-    asci.next = NULL;
+    XrActionSetCreateInfo asci = {XR_TYPE_ACTION_SET_CREATE_INFO};
     asci.priority = priority;
     strcpy(asci.actionSetName, name);
     strcpy(asci.localizedActionSetName, localizedName);
@@ -2504,9 +2502,7 @@ static XrAction CreateAction(
     XrPath* subactionPaths) {
     ALOGV("CreateAction %s, %" PRIi32, actionName, countSubactionPaths);
 
-    XrActionCreateInfo aci = {};
-    aci.type = XR_TYPE_ACTION_CREATE_INFO;
-    aci.next = NULL;
+    XrActionCreateInfo aci = {XR_TYPE_ACTION_CREATE_INFO};
     aci.actionType = type;
     if (countSubactionPaths > 0) {
         aci.countSubactionPaths = countSubactionPaths;
@@ -2529,8 +2525,7 @@ static XrActionSuggestedBinding ActionSuggestedBinding(XrAction action, const ch
 }
 
 static XrSpace CreateActionSpace(XrAction poseAction, XrPath subactionPath) {
-    XrActionSpaceCreateInfo asci = {};
-    asci.type = XR_TYPE_ACTION_SPACE_CREATE_INFO;
+    XrActionSpaceCreateInfo asci = {XR_TYPE_ACTION_SPACE_CREATE_INFO};
     asci.action = poseAction;
     asci.poseInActionSpace.orientation.w = 1.0f;
     asci.subactionPath = subactionPath;
@@ -2540,49 +2535,41 @@ static XrSpace CreateActionSpace(XrAction poseAction, XrPath subactionPath) {
 }
 
 static XrActionStateBoolean GetActionStateBoolean(XrAction action) {
-    XrActionStateGetInfo getInfo = {};
-    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
     getInfo.action = action;
 
-    XrActionStateBoolean state = {};
-    state.type = XR_TYPE_ACTION_STATE_BOOLEAN;
+    XrActionStateBoolean state = {XR_TYPE_ACTION_STATE_BOOLEAN};
 
     OXR(xrGetActionStateBoolean(appState.Session, &getInfo, &state));
     return state;
 }
 
 static XrActionStateFloat GetActionStateFloat(XrAction action) {
-    XrActionStateGetInfo getInfo = {};
-    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
     getInfo.action = action;
 
-    XrActionStateFloat state = {};
-    state.type = XR_TYPE_ACTION_STATE_FLOAT;
+    XrActionStateFloat state = {XR_TYPE_ACTION_STATE_FLOAT};
 
     OXR(xrGetActionStateFloat(appState.Session, &getInfo, &state));
     return state;
 }
 
 static XrActionStateVector2f GetActionStateVector2(XrAction action) {
-    XrActionStateGetInfo getInfo = {};
-    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
     getInfo.action = action;
 
-    XrActionStateVector2f state = {};
-    state.type = XR_TYPE_ACTION_STATE_VECTOR2F;
+    XrActionStateVector2f state = {XR_TYPE_ACTION_STATE_VECTOR2F};
 
     OXR(xrGetActionStateVector2f(appState.Session, &getInfo, &state));
     return state;
 }
 
 static bool ActionPoseIsActive(XrAction action, XrPath subactionPath) {
-    XrActionStateGetInfo getInfo = {};
-    getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
+    XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
     getInfo.action = action;
     getInfo.subactionPath = subactionPath;
 
-    XrActionStatePose state = {};
-    state.type = XR_TYPE_ACTION_STATE_POSE;
+    XrActionStatePose state = {XR_TYPE_ACTION_STATE_POSE};
     OXR(xrGetActionStatePose(appState.Session, &getInfo, &state));
     return state.isActive != XR_FALSE;
 }
@@ -2593,7 +2580,7 @@ typedef struct {
 } LocVel;
 
 static LocVel GetSpaceLocVel(XrSpace space, XrTime time) {
-    LocVel lv = {{}};
+    LocVel lv = {{0}};
     lv.loc.type = XR_TYPE_SPACE_LOCATION;
     lv.loc.next = &lv.vel;
     lv.vel.type = XR_TYPE_SPACE_VELOCITY;
@@ -2794,11 +2781,9 @@ void android_main(struct android_app* app) {
     // AppSpaceWarp Get recommended motion vector resolution, we don't recommend to use higher
     // motion vector resolution than recommended It won't give you extra quality improvement even it
     // make your motion vector pass more expensive.
-    XrSystemSpaceWarpPropertiesFB spaceWarpProperties = {};
-    spaceWarpProperties.type = XR_TYPE_SYSTEM_SPACE_WARP_PROPERTIES_FB;
+    XrSystemSpaceWarpPropertiesFB spaceWarpProperties = {XR_TYPE_SYSTEM_SPACE_WARP_PROPERTIES_FB};
 
-    XrSystemProperties systemProperties = {};
-    systemProperties.type = XR_TYPE_SYSTEM_PROPERTIES;
+    XrSystemProperties systemProperties = {XR_TYPE_SYSTEM_PROPERTIES};
     systemProperties.next = &spaceWarpProperties;
 
     OXR(xrGetSystemProperties(appState.Instance, systemId, &systemProperties));
@@ -2831,8 +2816,7 @@ void android_main(struct android_app* app) {
         "xrGetOpenGLESGraphicsRequirementsKHR",
         (PFN_xrVoidFunction*)(&pfnGetOpenGLESGraphicsRequirementsKHR)));
 
-    XrGraphicsRequirementsOpenGLESKHR graphicsRequirements = {};
-    graphicsRequirements.type = XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR;
+    XrGraphicsRequirementsOpenGLESKHR graphicsRequirements = {XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR};
     OXR(pfnGetOpenGLESGraphicsRequirementsKHR(appState.Instance, systemId, &graphicsRequirements));
 
     // Create the EGL Context
@@ -2857,16 +2841,12 @@ void android_main(struct android_app* app) {
     appState.SystemId = systemId;
 
     // Create the OpenXR Session.
-    XrGraphicsBindingOpenGLESAndroidKHR graphicsBindingAndroidGLES = {};
-    graphicsBindingAndroidGLES.type = XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR;
-    graphicsBindingAndroidGLES.next = NULL;
+    XrGraphicsBindingOpenGLESAndroidKHR graphicsBindingAndroidGLES = {XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     graphicsBindingAndroidGLES.display = appState.Egl.Display;
     graphicsBindingAndroidGLES.config = appState.Egl.Config;
     graphicsBindingAndroidGLES.context = appState.Egl.Context;
 
-    XrSessionCreateInfo sessionCreateInfo = {};
-    memset(&sessionCreateInfo, 0, sizeof(sessionCreateInfo));
-    sessionCreateInfo.type = XR_TYPE_SESSION_CREATE_INFO;
+    XrSessionCreateInfo sessionCreateInfo = {XR_TYPE_SESSION_CREATE_INFO};
     sessionCreateInfo.next = &graphicsBindingAndroidGLES;
     sessionCreateInfo.createFlags = 0;
     sessionCreateInfo.systemId = appState.SystemId;
@@ -2998,8 +2978,7 @@ void android_main(struct android_app* app) {
     free(referenceSpaces);
 
     // Create a space to the first path
-    XrReferenceSpaceCreateInfo spaceCreateInfo = {};
-    spaceCreateInfo.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
+    XrReferenceSpaceCreateInfo spaceCreateInfo = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
     spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
     spaceCreateInfo.poseInReferenceSpace.orientation.w = 1.0f;
     OXR(xrCreateReferenceSpace(appState.Session, &spaceCreateInfo, &appState.HeadSpace));
@@ -3082,9 +3061,7 @@ void android_main(struct android_app* app) {
         bindings[currBinding++] =
             ActionSuggestedBinding(dummyAction, "/user/hand/right/input/system/click");
 
-        XrInteractionProfileSuggestedBinding suggestedBindings = {};
-        suggestedBindings.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
-        suggestedBindings.next = NULL;
+        XrInteractionProfileSuggestedBinding suggestedBindings = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         suggestedBindings.suggestedBindings = bindings;
         suggestedBindings.countSuggestedBindings = currBinding;
 
@@ -3142,18 +3119,14 @@ void android_main(struct android_app* app) {
             }
         }
 
-        XrInteractionProfileSuggestedBinding suggestedBindings = {};
-        suggestedBindings.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING;
-        suggestedBindings.next = NULL;
+        XrInteractionProfileSuggestedBinding suggestedBindings = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         suggestedBindings.interactionProfile = interactionProfilePath;
         suggestedBindings.suggestedBindings = bindings;
         suggestedBindings.countSuggestedBindings = currBinding;
         OXR(xrSuggestInteractionProfileBindings(appState.Instance, &suggestedBindings));
 
         // Attach to session
-        XrSessionActionSetsAttachInfo attachInfo = {};
-        attachInfo.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO;
-        attachInfo.next = NULL;
+        XrSessionActionSetsAttachInfo attachInfo = {XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
         attachInfo.countActionSets = 1;
         attachInfo.actionSets = &runningActionSet;
         OXR(xrAttachSessionActionSets(appState.Session, &attachInfo));
@@ -3171,9 +3144,7 @@ void android_main(struct android_app* app) {
             gripPoseAction,
         };
         for (size_t i = 0; i < sizeof(actionsToEnumerate) / sizeof(actionsToEnumerate[0]); ++i) {
-            XrBoundSourcesForActionEnumerateInfo enumerateInfo = {};
-            enumerateInfo.type = XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO;
-            enumerateInfo.next = NULL;
+            XrBoundSourcesForActionEnumerateInfo enumerateInfo = {XR_TYPE_BOUND_SOURCES_FOR_ACTION_ENUMERATE_INFO};
             enumerateInfo.action = actionsToEnumerate[i];
 
             // Get Count
@@ -3189,9 +3160,7 @@ void android_main(struct android_app* app) {
                 OXR(xrEnumerateBoundSourcesForAction(
                     appState.Session, &enumerateInfo, 16, &countOutput, actionPathsBuffer));
                 for (uint32_t a = 0; a < countOutput; ++a) {
-                    XrInputSourceLocalizedNameGetInfo nameGetInfo = {};
-                    nameGetInfo.type = XR_TYPE_INPUT_SOURCE_LOCALIZED_NAME_GET_INFO;
-                    nameGetInfo.next = NULL;
+                    XrInputSourceLocalizedNameGetInfo nameGetInfo = {XR_TYPE_INPUT_SOURCE_LOCALIZED_NAME_GET_INFO};
                     nameGetInfo.sourcePath = actionPathsBuffer[a];
                     nameGetInfo.whichComponents = XR_INPUT_SOURCE_LOCALIZED_NAME_USER_PATH_BIT |
                         XR_INPUT_SOURCE_LOCALIZED_NAME_INTERACTION_PROFILE_BIT |
@@ -3301,13 +3270,8 @@ void android_main(struct android_app* app) {
 
         // NOTE: OpenXR does not use the concept of frame indices. Instead,
         // XrWaitFrame returns the predicted display time.
-        XrFrameWaitInfo waitFrameInfo = {};
-        waitFrameInfo.type = XR_TYPE_FRAME_WAIT_INFO;
-        waitFrameInfo.next = NULL;
-
-        XrFrameState frameState = {};
-        frameState.type = XR_TYPE_FRAME_STATE;
-        frameState.next = NULL;
+        XrFrameWaitInfo waitFrameInfo = {XR_TYPE_FRAME_WAIT_INFO};
+        XrFrameState frameState = {XR_TYPE_FRAME_STATE};
 
         OXR(xrWaitFrame(appState.Session, &waitFrameInfo, &frameState));
 
@@ -3315,21 +3279,17 @@ void android_main(struct android_app* app) {
         // the new eye images will be displayed. The number of frames predicted ahead
         // depends on the pipeline depth of the engine and the synthesis rate.
         // The better the prediction, the less black will be pulled in at the edges.
-        XrFrameBeginInfo beginFrameDesc = {};
-        beginFrameDesc.type = XR_TYPE_FRAME_BEGIN_INFO;
-        beginFrameDesc.next = NULL;
+        XrFrameBeginInfo beginFrameDesc = {XR_TYPE_FRAME_BEGIN_INFO};
         OXR(xrBeginFrame(appState.Session, &beginFrameDesc));
 
-        XrSpaceLocation loc = {};
-        loc.type = XR_TYPE_SPACE_LOCATION;
+        XrSpaceLocation loc = {XR_TYPE_SPACE_LOCATION};
         OXR(xrLocateSpace(
             appState.HeadSpace, appState.CurrentSpace, frameState.predictedDisplayTime, &loc));
         XrPosef xfStageFromHead = loc.pose;
         OXR(xrLocateSpace(
             appState.HeadSpace, appState.LocalSpace, frameState.predictedDisplayTime, &loc));
 
-        XrViewLocateInfo projectionInfo = {};
-        projectionInfo.type = XR_TYPE_VIEW_LOCATE_INFO;
+        XrViewLocateInfo projectionInfo = {XR_TYPE_VIEW_LOCATE_INFO};
         projectionInfo.viewConfigurationType = appState.ViewportConfig.viewConfigurationType;
         projectionInfo.displayTime = frameState.predictedDisplayTime;
         projectionInfo.space = appState.HeadSpace;
@@ -3376,8 +3336,10 @@ void android_main(struct android_app* app) {
         forwardDir = XrQuaternionf_Rotate(xfWorldFromHead.orientation, forwardDir);
 
         if (appState.Focused) {
-            cameraPos = XrVector3f_Add(
-                cameraPos, XrVector3f_ScalarMultiply(forwardDir, 0.1f * appJoystickY));
+            XrVector3f scaled = XrVector3f_ScalarMultiply(forwardDir, 0.1f * appJoystickY);
+            XrVector3f newCameraPos;
+            XrVector3f_Add(&newCameraPos, &cameraPos, &scaled);
+            cameraPos = newCameraPos;
         }
 
         cameraPos.y = 0.0f;
@@ -3428,21 +3390,17 @@ void android_main(struct android_app* app) {
 
         // OpenXR input
         // sync action data
-        XrActiveActionSet activeActionSet = {};
+        XrActiveActionSet activeActionSet = {0};
         activeActionSet.actionSet = runningActionSet;
         activeActionSet.subactionPath = XR_NULL_PATH;
 
-        XrActionsSyncInfo syncInfo = {};
-        syncInfo.type = XR_TYPE_ACTIONS_SYNC_INFO;
-        syncInfo.next = NULL;
+        XrActionsSyncInfo syncInfo = {XR_TYPE_ACTIONS_SYNC_INFO};
         syncInfo.countActiveActionSets = 1;
         syncInfo.activeActionSets = &activeActionSet;
         OXR(xrSyncActions(appState.Session, &syncInfo));
 
         // query input action states
-        XrActionStateGetInfo getInfo = {};
-        getInfo.type = XR_TYPE_ACTION_STATE_GET_INFO;
-        getInfo.next = NULL;
+        XrActionStateGetInfo getInfo = {XR_TYPE_ACTION_STATE_GET_INFO};
         getInfo.subactionPath = XR_NULL_PATH;
 
         XrActionStateBoolean toggleState = GetActionStateBoolean(toggleAction);
@@ -3511,8 +3469,10 @@ void android_main(struct android_app* app) {
         // NOTE: Multiple independent layers are allowed, but they need to be added
         // in a depth consistent order.
 
-        XrCompositionLayerProjectionView projection_layer_elements[2] = {};
-        XrCompositionLayerSpaceWarpInfoFB proj_spacewarp_views[2] = {};
+        XrCompositionLayerProjectionView projection_layer_elements[2] = {
+            {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}, {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
+        XrCompositionLayerSpaceWarpInfoFB proj_spacewarp_views[2] = {
+            {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB}, {XR_TYPE_COMPOSITION_LAYER_SPACE_WARP_INFO_FB}};
 
         appState.LayerCount = 0;
         memset(appState.Layers, 0, sizeof(ovrCompositorLayer_Union) * ovrMaxLayerCount);
@@ -3537,8 +3497,7 @@ void android_main(struct android_app* app) {
                 &prevFrameSceneMatrices,
                 &prevFrameSceneTransform);
 
-            XrCompositionLayerProjection projection_layer = {};
-            projection_layer.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
+            XrCompositionLayerProjection projection_layer = {XR_TYPE_COMPOSITION_LAYER_PROJECTION};
             projection_layer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
             projection_layer.layerFlags |= XR_COMPOSITION_LAYER_CORRECT_CHROMATIC_ABERRATION_BIT;
             projection_layer.space = appState.CurrentSpace;
@@ -3661,9 +3620,7 @@ void android_main(struct android_app* app) {
 
             XrPosef InvXrSpacePoseInWorld = XrPosef_Inverse(sceneMatrices.XrSpacePoseInWorld);
 
-            XrCompositionLayerQuad quad_layer_left = {};
-            quad_layer_left.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-            quad_layer_left.next = NULL;
+            XrCompositionLayerQuad quad_layer_left = {XR_TYPE_COMPOSITION_LAYER_QUAD};
             quad_layer_left.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
             quad_layer_left.space = appState.CurrentSpace;
             quad_layer_left.eyeVisibility = XR_EYE_VISIBILITY_LEFT;
@@ -3687,9 +3644,7 @@ void android_main(struct android_app* app) {
             quad_layer_left.size = size;
             appState.Layers[appState.LayerCount++].Quad = quad_layer_left;
 
-            XrCompositionLayerQuad quad_layer_right = {};
-            quad_layer_right.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-            quad_layer_right.next = NULL;
+            XrCompositionLayerQuad quad_layer_right = {XR_TYPE_COMPOSITION_LAYER_QUAD};
             quad_layer_right.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
             quad_layer_right.space = appState.CurrentSpace;
             quad_layer_right.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
@@ -3716,13 +3671,12 @@ void android_main(struct android_app* app) {
         }
 
         // Compose the layers for this frame.
-        const XrCompositionLayerBaseHeader* layers[ovrMaxLayerCount] = {};
+        const XrCompositionLayerBaseHeader* layers[ovrMaxLayerCount] = {0};
         for (int i = 0; i < appState.LayerCount; i++) {
             layers[i] = (const XrCompositionLayerBaseHeader*)&appState.Layers[i];
         }
 
-        XrFrameEndInfo endFrameInfo = {};
-        endFrameInfo.type = XR_TYPE_FRAME_END_INFO;
+        XrFrameEndInfo endFrameInfo = {XR_TYPE_FRAME_END_INFO};
         endFrameInfo.displayTime = frameState.predictedDisplayTime;
         endFrameInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
         endFrameInfo.layerCount = appState.LayerCount;

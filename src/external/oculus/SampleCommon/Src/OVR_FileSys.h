@@ -207,4 +207,8 @@ inline bool ToRelativePath(
 
 bool HasPermission(const char* fileOrDirName, const permissionFlags_t flags);
 
+#if defined(OVR_OS_WIN32)
+std::string exeDirAsUri();
+#endif
+
 } // namespace OVRFW

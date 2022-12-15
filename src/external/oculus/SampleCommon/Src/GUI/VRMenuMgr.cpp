@@ -1059,7 +1059,7 @@ void VRMenuMgrLocal::SubmitForRenderingRecursive(
         // index)
         int di = distanceIndex;
         if (di < 0 && (oFlags & VRMenuObjectFlags_t(VRMENUOBJECT_RENDER_HIERARCHY_ORDER))) {
-            di = submissionIndex;
+            di = curIndex;
         }
 
         for (int i = 0; i < static_cast<int>(obj->Children.size()); ++i) {
@@ -1226,7 +1226,7 @@ void VRMenuMgrLocal::Finish(Matrix4f const& viewMatrix) {
         // the submission index. This sorts on distance while still allowing submission order to
         // contribute in the equal case. The DistanceIndex is used to force a submitted object to
         // use some other object's distance instead of its own, allowing a group of objects to sort
-        // against all other object's based on a single distance. Objects uising the same
+        // against all other object's based on a single distance. Objects using the same
         // DistanceIndex will then be sorted against each other based only on their submission
         // index.
         float const distSq =

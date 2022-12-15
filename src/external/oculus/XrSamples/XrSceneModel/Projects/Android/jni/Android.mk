@@ -11,7 +11,8 @@ LOCAL_C_INCLUDES := \
 					$(LOCAL_PATH)/../../../Src/SceneModelXr.h \
 					$(LOCAL_PATH)/../../../../../1stParty/OVR/Include \
 					$(LOCAL_PATH)/../../../../../OpenXr/Include \
-					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/include/
+					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/include/ \
+					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/src/common/
 
 LOCAL_SRC_FILES	:= 	../../../Src/SimpleXrInput.cpp \
 					../../../Src/SceneModelGl.cpp \

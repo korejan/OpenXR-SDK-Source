@@ -122,12 +122,12 @@ class XrKeyboardApp : public OVRFW::XrApp {
         SetSwitchUseRemoteKeyboard(
             bigText_, connectionRequiredButton_, useRemoteKeyboardButton_, false);
 
-        trackingRequiredButton_ = ui_.AddButton(
-            "Show Untracked Keyboard", {0.1f, 0.75f, -1.9f}, {500.0f, 100.0f}, [=]() {
-            bool currentState = keyboard_->TrackingRequired();
-            bool newState = !currentState;
-            SetTrackingRequired(
-                bigText_, connectionRequiredButton_, trackingRequiredButton_, newState);
+        trackingRequiredButton_ =
+            ui_.AddButton("Show Untracked Keyboard", {0.1f, 0.75f, -1.9f}, {500.0f, 100.0f}, [=]() {
+                bool currentState = keyboard_->TrackingRequired();
+                bool newState = !currentState;
+                SetTrackingRequired(
+                    bigText_, connectionRequiredButton_, trackingRequiredButton_, newState);
             });
 
         SetTrackingRequired(bigText_, connectionRequiredButton_, trackingRequiredButton_, true);
@@ -252,7 +252,8 @@ class XrKeyboardApp : public OVRFW::XrApp {
         if (keyboard_->GetAndClearSystemKeyboardStateChanged()) {
             // update the render model
             if (keyboard_->SystemKeyboardExists()) {
-                std::vector<uint8_t> keyboardBuffer = renderModel_->LoadRenderModel(keyboard_->UseRemoteKeyboard());
+                std::vector<uint8_t> keyboardBuffer =
+                    renderModel_->LoadRenderModel(keyboard_->UseRemoteKeyboard());
                 if (keyboardBuffer.size() > 0) {
                     ALOG("### Keyboard Render Model Size: %u", (uint32_t)keyboardBuffer.size());
                     keyboardRenderer_.Init(keyboardBuffer);
@@ -372,18 +373,9 @@ class XrKeyboardApp : public OVRFW::XrApp {
             OXR(passthrough_->GetLastError());
         }
 
-        /// UI
-        ui_.HitTestDevices().clear();
-        if (in.LeftRemoteTracked) {
-            controllerRenderL_.Update(in.LeftRemotePose);
-            const bool didPinch = in.LeftRemoteIndexTrigger > 0.25f;
-            ui_.AddHitTestRay(in.LeftRemotePointPose, didPinch);
-        }
-        if (in.RightRemoteTracked) {
-            controllerRenderR_.Update(in.RightRemotePose);
-            const bool didPinch = in.RightRemoteIndexTrigger > 0.25f;
-            ui_.AddHitTestRay(in.RightRemotePointPose, didPinch);
-        }
+        controllerRenderL_.Update(in.LeftRemotePose);
+        controllerRenderR_.Update(in.RightRemotePose);
+
         if (handL_->AreLocationsActive()) {
             handRendererL_.Update(handL_->Joints(), handL_->RenderScale());
             handMaskRendererL_.Update(
@@ -391,8 +383,8 @@ class XrKeyboardApp : public OVRFW::XrApp {
                 FromXrPosef(handL_->Joints()[XR_HAND_JOINT_WRIST_EXT].pose),
                 handRendererL_.Transforms(),
                 handL_->RenderScale());
-            ui_.AddHitTestRay(FromXrPosef(handL_->AimPose()), handL_->IndexPinching());
         }
+
         if (handR_->AreLocationsActive()) {
             handRendererR_.Update(handR_->Joints(), handR_->RenderScale());
             handMaskRendererR_.Update(
@@ -400,8 +392,25 @@ class XrKeyboardApp : public OVRFW::XrApp {
                 FromXrPosef(handR_->Joints()[XR_HAND_JOINT_WRIST_EXT].pose),
                 handRendererR_.Transforms(),
                 handR_->RenderScale());
-            ui_.AddHitTestRay(FromXrPosef(handR_->AimPose()), handR_->IndexPinching());
         }
+
+        /// UI
+        ui_.HitTestDevices().clear();
+
+        if (handR_->AreLocationsActive()) {
+            ui_.AddHitTestRay(FromXrPosef(handR_->AimPose()), handR_->IndexPinching());
+        } else if (in.RightRemoteTracked) {
+            const bool didPinch = in.RightRemoteIndexTrigger > 0.25f;
+            ui_.AddHitTestRay(in.RightRemotePointPose, didPinch);
+        }
+
+        if (handL_->AreLocationsActive()) {
+            ui_.AddHitTestRay(FromXrPosef(handL_->AimPose()), handL_->IndexPinching());
+        } else if (in.LeftRemoteTracked) {
+            const bool didPinch = in.LeftRemoteIndexTrigger > 0.25f;
+            ui_.AddHitTestRay(in.LeftRemotePointPose, didPinch);
+        }
+
         ui_.Update(in);
         beamRenderer_.Update(in, ui_.HitTestDevices());
     }
@@ -420,14 +429,6 @@ class XrKeyboardApp : public OVRFW::XrApp {
 
         /// Render UI
         ui_.Render(in, out);
-
-        /// Render controllers
-        if (in.LeftRemoteTracked) {
-            controllerRenderL_.Render(out.Surfaces);
-        }
-        if (in.RightRemoteTracked) {
-            controllerRenderR_.Render(out.Surfaces);
-        }
 
         /// Render keyboard
         if (renderKeyboard_) {
@@ -476,6 +477,10 @@ class XrKeyboardApp : public OVRFW::XrApp {
             if (MaskBlend > 0.0f) {
                 renderPassthroughHands_ = true;
             }
+        } else if (in.LeftRemoteTracked) {
+            // Only render controller when hands are not rendered
+            // Note: Hand tracking can drive controller positions as well.
+            controllerRenderL_.Render(out.Surfaces);
         }
 
         if (handR_->AreLocationsActive() && handR_->IsPositionValid()) {
@@ -501,6 +506,10 @@ class XrKeyboardApp : public OVRFW::XrApp {
             if (MaskBlend > 0.0f) {
                 renderPassthroughHands_ = true;
             }
+        } else if (in.RightRemoteTracked) {
+            // Only render controller when hands are not rendered
+            // Note: Hand tracking can drive controller positions as well.
+            controllerRenderR_.Render(out.Surfaces);
         }
     }
 

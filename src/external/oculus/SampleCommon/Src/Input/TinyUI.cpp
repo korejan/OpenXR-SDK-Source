@@ -125,6 +125,8 @@ class SimpleTargetMenu : public OVRFW::VRMenu {
             2.0f,
             OVRFW::VRMenuFlags_t(OVRFW::VRMENU_FLAG_SHORT_PRESS_HANDLED_BY_APP),
             itemParms);
+
+        DeletePointerArray(itemParms);
     }
 
     virtual ~SimpleTargetMenu(){};

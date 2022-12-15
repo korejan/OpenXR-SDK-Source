@@ -498,11 +498,9 @@ std::unordered_map<XrPath, std::vector<XrActionSuggestedBinding>> XrApp::GetSugg
     // By default we support "oculus/touch_controller" and "khr/simple_controller" as a fallback
     // All supported controllers should be explicitly listed here
 
-#if defined(USE_SIMPLE_CONTROLLER_PROFILE)
     XrPath simpleInteractionProfile = XR_NULL_PATH;
     OXR(xrStringToPath(
         instance, "/interaction_profiles/khr/simple_controller", &simpleInteractionProfile));
-#endif
 
     XrPath touchInteractionProfile = XR_NULL_PATH;
     OXR(xrStringToPath(
@@ -555,7 +553,6 @@ std::unordered_map<XrPath, std::vector<XrActionSuggestedBinding>> XrApp::GetSugg
     suggestedBindings[touchInteractionProfile].emplace_back(
         ActionSuggestedBinding(TriggerTouchAction, "/user/hand/right/input/trigger/touch"));
 
-#if defined(USE_SIMPLE_CONTROLLER_PROFILE)
     // -----------------------------------------
     // Default bindings for khr/simple_controller
     // -----------------------------------------
@@ -577,7 +574,6 @@ std::unordered_map<XrPath, std::vector<XrActionSuggestedBinding>> XrApp::GetSugg
         ActionSuggestedBinding(ButtonBAction, "/user/hand/right/input/menu/click"));
     suggestedBindings[simpleInteractionProfile].emplace_back(
         ActionSuggestedBinding(ButtonMenuAction, "/user/hand/left/input/menu/click"));
-#endif
 
     return suggestedBindings;
 }
@@ -898,12 +894,6 @@ bool XrApp::Init(const xrJava& context) {
                 LoadModelFile(fs, sceneUri.c_str(), Scene.GetDefaultGLPrograms(), materialParms));
             if (SceneModel != nullptr) {
                 Scene.SetWorldModel(*SceneModel);
-                Vector3f modelOffset;
-                modelOffset.x = 0.5f;
-                modelOffset.y = 0.0f;
-                modelOffset.z = -2.25f;
-                Scene.GetWorldModel()->State.SetMatrix(
-                    Matrix4f::Scaling(2.5f, 2.5f, 2.5f) * Matrix4f::Translation(modelOffset));
             }
         }
     }

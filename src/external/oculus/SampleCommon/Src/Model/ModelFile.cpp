@@ -158,7 +158,6 @@ void LoadModelFileTexture(
     model.Textures.push_back(tex);
 }
 
-#if !defined(OVR_OS_WIN32)
 static ModelFile* LoadZippedModelFile(
     unzFile zfp,
     const char* fileName,
@@ -220,6 +219,8 @@ static ModelFile* LoadZippedModelFile(
 
     return modelFilePtr;
 }
+
+#if !defined(OVR_OS_WIN32)
 
 struct zlib_mmap_opaque {
     MappedFile file;
@@ -419,6 +420,20 @@ ModelFile* LoadModelFileFromMemory(
     if (strstr(fileName, ".glb") != nullptr) {
         return LoadModelFile_glB(
             fileName, (char*)buffer, bufferLength, programs, materialParms, outModelGeo);
+    }
+
+    // Mobile code defaults to zipped ovrscene files - read those here
+    if (strstr(fileName, ".ovrscene") != nullptr) {
+        // crude URI -> file unpacking
+        std::string exeDirUri = exeDirAsUri();
+        std::string fileUri = std::string(fileName).substr(6); // remove "apk://"
+        std::string rawFileName = exeDirUri.substr(8) + fileUri; // remove "file:///"
+
+        unzFile zfp = unzOpen(rawFileName.c_str());
+        ModelFile* modelFile = LoadZippedModelFile(
+            zfp, fileName, (char*)buffer, bufferLength, programs, materialParms, outModelGeo);
+
+        return modelFile;
     }
 
     return nullptr;

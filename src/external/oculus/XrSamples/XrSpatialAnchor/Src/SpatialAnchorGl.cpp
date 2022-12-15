@@ -7,7 +7,7 @@ Content		:	This sample is derived from VrCubeWorld_SurfaceView.
 Created		:	July, 2020
 Authors		:	Cass Everitt
 
-Copyright	:	Copyright (c) Facebook Technologies, LLC and its affiliates. All rights reserved.
+Copyright	:	Copyright (c) Meta Platforms, Inc. and its affiliates. All rights reserved.
 
 *************************************************************************************/
 

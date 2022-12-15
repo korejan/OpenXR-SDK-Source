@@ -303,4 +303,13 @@ inline void LogWithFileTag(const int prio, const char* fileTag, const char* fmt,
         }                                  \
     }
 
+#define OVR_WARN_ONCE(...)                 \
+    {                                      \
+        static bool alreadyWarned = false; \
+        if (!alreadyWarned) {              \
+            OVR_WARN(__VA_ARGS__);         \
+            alreadyWarned = true;          \
+        }                                  \
+    }
+
 #endif // OVRLib_Log_h

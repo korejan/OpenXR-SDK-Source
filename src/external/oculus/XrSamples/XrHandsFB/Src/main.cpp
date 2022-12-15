@@ -501,12 +501,12 @@ class XrHandsApp : public OVRFW::XrApp {
             axisRendererR_.Update(handJointsR);
         }
 
-        if (in.LeftRemoteTracked) {
+        if (in.LeftRemoteTracked && !handTrackedL_) {
             controllerRenderL_.Update(in.LeftRemotePose);
             const bool didPinch = in.LeftRemoteIndexTrigger > 0.5f;
             ui_.AddHitTestRay(in.LeftRemotePointPose, didPinch);
         }
-        if (in.RightRemoteTracked) {
+        if (in.RightRemoteTracked && !handTrackedR_) {
             controllerRenderR_.Update(in.RightRemotePose);
             const bool didPinch = in.RightRemoteIndexTrigger > 0.5f;
             ui_.AddHitTestRay(in.RightRemotePointPose, didPinch);
@@ -521,11 +521,11 @@ class XrHandsApp : public OVRFW::XrApp {
         /// Render UI
         ui_.Render(in, out);
 
-        /// Render controllers
-        if (in.LeftRemoteTracked) {
+        /// Render controllers when hands are not tracked
+        if (in.LeftRemoteTracked && !handTrackedL_) {
             controllerRenderL_.Render(out.Surfaces);
         }
-        if (in.RightRemoteTracked) {
+        if (in.RightRemoteTracked && !handTrackedR_) {
             controllerRenderR_.Render(out.Surfaces);
         }
 

@@ -1037,7 +1037,9 @@ bool LoadModelFile_glTF_Json(
                                                         (int)((unsigned short*)(acc.BufferData()))
                                                             [accIndex * 4 + 3];
                                                 }
-                                            } else if (acc.componentType == GL_BYTE) {
+                                            } else if (
+                                                acc.componentType == GL_BYTE ||
+                                                acc.componentType == GL_UNSIGNED_BYTE) {
                                                 attribs.jointIndices.resize(acc.count);
                                                 for (int accIndex = 0; accIndex < acc.count;
                                                      accIndex++) {

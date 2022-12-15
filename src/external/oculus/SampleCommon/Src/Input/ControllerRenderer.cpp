@@ -151,8 +151,11 @@ void ControllerRenderer::LoadModelFromResource(
 bool ControllerRenderer::Init(
     bool leftController,
     OVRFW::ovrFileSys* fileSys,
-    const char* controllerModelFile) {
+    const char* controllerModelFile,
+    const OVR::Matrix4f& poseCorrection) {
     Model = nullptr;
+
+    PoseCorrection = poseCorrection;
 
     /// Shader
     ovrProgramParm UniformParms[] = {
@@ -257,9 +260,7 @@ void ControllerRenderer::Shutdown() {
 
 void ControllerRenderer::Update(const OVR::Posef& pose) {
     const OVR::Posef controllerPose = pose;
-    const OVR::Matrix4f matDeviceModel = OVR::Matrix4f(controllerPose) *
-        Matrix4f::RotationY(OVR::DegreeToRad(180.0f)) *
-        Matrix4f::RotationX(OVR::DegreeToRad(-90.0f));
+    const OVR::Matrix4f matDeviceModel = OVR::Matrix4f(controllerPose) * PoseCorrection;
     ControllerSurface.modelMatrix = matDeviceModel;
 }
 

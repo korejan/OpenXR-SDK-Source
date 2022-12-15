@@ -31,6 +31,8 @@
 #include <atomic>
 #include <memory>
 #include <cstring> // memcpy
+#include <inttypes.h>
+#include "OVR_LogUtils.h"
 
 #if defined(OVR_OS_WIN32) || defined(_WIN32) || defined(_WIN64)
 #if !defined(NOMINMAX)
@@ -274,6 +276,9 @@ class LocklessDataHelper {
 
     inline bool GetData(const uint8_t** buffers, uint8_t* outData, int32_t& outSize) const {
         const int32_t inSize = outSize;
+        if (outData == nullptr) {
+            OVR_WARN("GetData: output buffer is null, in size = %" PRId32, inSize);
+        }
         outSize = 0;
 
         for (;;) {
@@ -283,7 +288,16 @@ class LocklessDataHelper {
                 return false;
             }
 
-            std::memcpy(outData, buffers[locker.ReadIndex], locker.BufferSize);
+            auto buffer = buffers[locker.ReadIndex];
+            if (buffer == nullptr) {
+                OVR_WARN(
+                    "GetData: input buffer is null, read index = %" PRId32
+                    ", buffer size = %" PRId32 ", in size = %" PRId32,
+                    locker.ReadIndex,
+                    locker.BufferSize,
+                    inSize);
+            }
+            std::memcpy(outData, buffer, locker.BufferSize);
 #ifdef LOCKLESS_DATA_HELPER_CHECK_HASH
             const HashType expectedHash = Hashes[locker.ReadIndex];
 #endif

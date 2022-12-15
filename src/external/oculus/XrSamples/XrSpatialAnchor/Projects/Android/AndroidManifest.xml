@@ -21,15 +21,16 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-  <!-- Allows to access TrackingEnvironment functionality -->
-  <uses-permission android:name="com.oculus.permission.ACCESS_TRACKING_ENV" />
-
   <!-- Grants access to Passthrough API. -->
   <uses-feature android:name="com.oculus.feature.PASSTHROUGH" />
 
   <!-- Grants access to Spatial Anchors. -->
   <uses-permission android:name="com.oculus.permission.USE_ANCHOR_API" />
-    <application
+
+  <!-- Grants access to Shared Spatial Anchors. -->
+  <uses-permission android:name="com.oculus.permission.IMPORT_EXPORT_IOT_MAP_DATA" />
+
+  <application
       android:allowBackup="false"
       android:label="spatialanchor"
       >
