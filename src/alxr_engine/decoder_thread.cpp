@@ -80,6 +80,9 @@ void XrDecoderThread::Start(const XrDecoderThread::StartCtx& ctx)
 			optionMap.setInt32("vendor.rtc-ext-dec-low-latency.enable", 1);
 			//// qualcom,e.g. Quest 1/2 hw decoder.
 			optionMap.setInt32("vendor.qti-ext-dec-low-latency.enable", 1);
+			//// AMD
+			optionMap.setInt32("output-decode-order", 1);
+			optionMap.setInt32("decode-low-latency", 1);
 #endif
 			const IDecoderPlugin::RunCtx runCtx {
 				.optionMap	 = std::move(optionMap),

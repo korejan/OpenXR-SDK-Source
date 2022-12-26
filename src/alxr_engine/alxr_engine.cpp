@@ -336,9 +336,9 @@ void alxr_on_tracking_update(const bool clientsidePrediction)
     ALXREyeInfo newEyeInfo{};
     if (!gProgram->GetEyeInfo(newEyeInfo))
         return;
-    if (std::abs(newEyeInfo.ipd - gLastEyeInfo.ipd) > 0.00001f ||
-        std::abs(newEyeInfo.eyeFov[0].left - gLastEyeInfo.eyeFov[0].left) > 0.00001f ||
-        std::abs(newEyeInfo.eyeFov[1].left - gLastEyeInfo.eyeFov[1].left) > 0.00001f)
+    if (std::abs(newEyeInfo.ipd - gLastEyeInfo.ipd) > 0.01f ||
+        std::abs(newEyeInfo.eyeFov[0].left - gLastEyeInfo.eyeFov[0].left) > 0.01f ||
+        std::abs(newEyeInfo.eyeFov[1].left - gLastEyeInfo.eyeFov[1].left) > 0.01f)
     {
         gLastEyeInfo = newEyeInfo;
         gRustCtx->viewsConfigSend(&newEyeInfo);

@@ -33,6 +33,7 @@ enum class OxrRuntimeType
     Oculus,
     Pico,
     HTCWave,
+    MagicLeap,
     Unknown,
 ////////////////////////
     TypeCount
@@ -40,12 +41,13 @@ enum class OxrRuntimeType
 
 constexpr inline std::string_view ToString(const OxrRuntimeType t) {
     switch (t) {
-    case OxrRuntimeType::SteamVR: return "SteamVR";
-    case OxrRuntimeType::Monado:  return "Monado";
-    case OxrRuntimeType::WMR:     return "Windows Mixed Reality";
-    case OxrRuntimeType::Oculus:  return "Oculus";
-    case OxrRuntimeType::Pico:    return "Pico";
-    case OxrRuntimeType::HTCWave: return "VIVE WAVE";
+    case OxrRuntimeType::SteamVR:   return "SteamVR";
+    case OxrRuntimeType::Monado:    return "Monado";
+    case OxrRuntimeType::WMR:       return "Windows Mixed Reality";
+    case OxrRuntimeType::Oculus:    return "Oculus";
+    case OxrRuntimeType::Pico:      return "Pico";
+    case OxrRuntimeType::HTCWave:   return "VIVE WAVE";
+    case OxrRuntimeType::MagicLeap: return "MAGICLEAP";
     default: return "Unknown";
     }
 }

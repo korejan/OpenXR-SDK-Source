@@ -72,9 +72,9 @@ using namespace XRPaths;
 #ifdef XR_USE_OXR_PICO
 constexpr inline const std::size_t ProfileMapSize = 1;
 #elif defined(XR_USE_OXR_OCULUS)
-constexpr inline const std::size_t ProfileMapSize = 10;
+constexpr inline const std::size_t ProfileMapSize = 11;
 #else
-constexpr inline const std::size_t ProfileMapSize = 9;
+constexpr inline const std::size_t ProfileMapSize = 10;
 #endif
 constexpr inline const std::array<const InteractionProfile, ProfileMapSize> InteractionProfileMap{
 #ifdef XR_USE_OXR_PICO
@@ -561,7 +561,32 @@ constexpr inline const std::array<const InteractionProfile, ProfileMapSize> Inte
         .extensionName = XR_MSFT_HAND_INTERACTION_EXTENSION_NAME,
         .quitPath = nullptr,
         .hapticPath = nullptr
-    }
+    },
+    InteractionProfile{
+        .boolMap {
+            LeftMap { MapEnd },
+            RightMap { ButtonMap
+                {ALVR_INPUT_SYSTEM_CLICK,   MenuClick},
+                {ALVR_INPUT_GRIP_CLICK,     ShoulderClick},
+                {ALVR_INPUT_TRIGGER_CLICK,  TriggerClick},
+                {ALVR_INPUT_TRACKPAD_CLICK, TrackpadClick},
+                {ALVR_INPUT_TRACKPAD_TOUCH, TrackpadTouch},
+                MapEnd
+            },
+        },
+        .scalarMap {
+            LeftMap{ MapEnd },
+            RightMap { ButtonMap
+                {ALVR_INPUT_TRIGGER_VALUE, TriggerValue},
+                {ALVR_INPUT_TRACKPAD_X,    TrackpadX},
+                {ALVR_INPUT_TRACKPAD_Y,    TrackpadY},
+                MapEnd
+            },
+        },
+        .path = "/interaction_profiles/ml/ml2_controller",
+        .extensionName = XR_ML_ML2_CONTROLLER_INTERACTION_EXTENSION_NAME,
+        .quitPath = nullptr,
+    },
 #endif
 };
 }

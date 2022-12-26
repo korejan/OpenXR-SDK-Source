@@ -494,7 +494,8 @@ struct CmdBuffer {
 
         constexpr const VkFenceCreateInfo fenceInfo {
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .pNext = nullptr
+            .pNext = nullptr,
+            .flags = 0
         };
         CHECK_VKCMD(vkCreateFence(m_vkDevice, &fenceInfo, nullptr, &execFence));
 
@@ -506,7 +507,8 @@ struct CmdBuffer {
         CHECK_CBSTATE(CmdBufferState::Initialized);
         constexpr const VkCommandBufferBeginInfo cmdBeginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr
+            .pNext = nullptr,
+            .flags = 0
         };
         CHECK_VKCMD(vkBeginCommandBuffer(buf, &cmdBeginInfo));
         SetState(CmdBufferState::Recording);
@@ -1111,10 +1113,11 @@ struct Texture {
     {
         m_vkDevice = vkDevice;
 
-        //VkAndroidHardwareBufferFormatPropertiesANDROID formatInfo{ VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID };
         formatInfo = {
             .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_FORMAT_PROPERTIES_ANDROID,
-            .pNext = nullptr
+            .pNext = nullptr,
+            .format = VK_FORMAT_UNDEFINED,
+            .formatFeatures = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
         };
         VkAndroidHardwareBufferPropertiesANDROID properties {
             .sType = VK_STRUCTURE_TYPE_ANDROID_HARDWARE_BUFFER_PROPERTIES_ANDROID,
@@ -1133,7 +1136,8 @@ struct Texture {
         };
         const VkExternalMemoryImageCreateInfo externalCreateInfo {
             .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-            .pNext = &externalFormat, //useExternalFormat ? &externalFormat : nullptr;
+            .pNext = formatInfo.format != VK_FORMAT_UNDEFINED ?
+                        nullptr : &externalFormat,
             .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID
         };
         const VkImageCreateInfo imageInfo {
@@ -1141,7 +1145,7 @@ struct Texture {
             .pNext = &externalCreateInfo,
             .flags = 0u,
             .imageType = VK_IMAGE_TYPE_2D,
-            .format = formatInfo.format, //useExternalFormat ? VK_FORMAT_UNDEFINED : formatInfo.format,
+            .format = formatInfo.format,
             .extent { width, height, 1u },
             .mipLevels = 1u,
             .arrayLayers = 1u,
@@ -3196,7 +3200,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         assert(swapchainContextPtr != nullptr);
         const std::uint32_t imageIndex = swapchainContextPtr->ImageIndex(swapchainImage);
 
-        m_cmdBuffer.Wait();
+        if (m_cmdBufferWaitNextFrame) {
+            m_cmdBuffer.Wait();
+        }
         m_cmdBuffer.Reset();
 #ifdef XR_USE_PLATFORM_ANDROID
         m_videoTextures[VidTextureIndex::DeferredDelete].Clear();
@@ -3214,6 +3220,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 #else
         m_cmdBuffer.Exec<1, 1>(m_vkQueue, { &m_texRendereComplete }, { &m_texCopy }, { VK_PIPELINE_STAGE_ALL_COMMANDS_BIT });
 #endif
+        if (!m_cmdBufferWaitNextFrame) {
+            m_cmdBuffer.Wait();
+        }
 
 #if defined(USE_MIRROR_WINDOW)
         // Cycle the window's swapchain on the last view rendered
@@ -3515,15 +3524,14 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         CHECK_VKCMD(vkCreateDescriptorPool(m_vkDevice, &poolInfo, nullptr, &m_descriptorPool));
         CHECK(m_descriptorPool != VK_NULL_HANDLE);
 
-        const std::vector<VkDescriptorSetLayout> layouts(swapChainCount, m_videoStreamLayout.descriptorSetLayout);
         const VkDescriptorSetAllocateInfo allocInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             .pNext = nullptr,
             .descriptorPool = m_descriptorPool,
-            .descriptorSetCount = swapChainCount,
-            .pSetLayouts = layouts.data()
+            .descriptorSetCount = 1,
+            .pSetLayouts = &m_videoStreamLayout.descriptorSetLayout
         };
-        m_descriptorSets.resize(swapChainCount);
+        m_descriptorSets.resize(1);
         CHECK_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, m_descriptorSets.data()));
     }
 
@@ -3646,6 +3654,10 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* fovDecParm) override {
         m_fovDecodeParams = fovDecParm ?
             std::make_shared<ALXR::FoveatedDecodeParams>(*fovDecParm) : nullptr;
+    }
+
+    virtual void SetCmdBufferWaitNextFrame(const bool enable) override {
+        m_cmdBufferWaitNextFrame = enable;
     }
 
     constexpr static const std::size_t VideoQueueSize = 2;
@@ -4107,12 +4119,15 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             return;
         }
 
+        AHardwareBuffer_Desc hwbuffDesc{};
+        AHardwareBuffer_describe(hwBuff, &hwbuffDesc);
+
         //auto start = GetSteadyTimestampUs();
         VideoTexture newVideoTex{};
         newVideoTex.ndkImage = img;
         newVideoTex.frameIndex = yuvBuffer.frameIndex;
-        newVideoTex.width = yuvBuffer.luma.pitch;
-        newVideoTex.height = yuvBuffer.luma.height;
+        newVideoTex.width = hwbuffDesc.width;   // yuvBuffer.luma.pitch;
+        newVideoTex.height = hwbuffDesc.height; // yuvBuffer.luma.height;
         
         Texture::AHBufferFormatProperties formatProperties;
         newVideoTex.texture.CreateAHardwareBufferImported
@@ -4131,7 +4146,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             const VkSamplerYcbcrConversionCreateInfo samplerInfo{
                 .sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO,
                 .pNext = &externalFormat,
-                .format = VK_FORMAT_UNDEFINED, //formatProperties.format
+                .format = formatProperties.format,
                 .ycbcrModel = formatProperties.suggestedYcbcrModel,
                 .ycbcrRange = formatProperties.suggestedYcbcrRange,
                 .components = formatProperties.samplerYcbcrConversionComponents,
@@ -4156,7 +4171,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             .pNext = &ycbcrConverInfo,
             .image = newVideoTex.texture.texImage,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = VK_FORMAT_UNDEFINED,
+            .format = formatProperties.format,
             .components = {
                 .r = VK_COMPONENT_SWIZZLE_IDENTITY,
                 .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -4393,6 +4408,8 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     using FoveatedDecodeParamsPtr = std::shared_ptr<ALXR::FoveatedDecodeParams>;
     FoveatedDecodeParamsPtr m_fovDecodeParams{};
 
+    bool m_cmdBufferWaitNextFrame = true;
+
     constexpr static const std::size_t VideoTexCount = 2;
 
 #ifndef XR_USE_PLATFORM_ANDROID
@@ -4532,8 +4549,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         CHECK(m_videoStreamLayout.textureSampler != VK_NULL_HANDLE);
         CHECK(vidTexture.imageView != VK_NULL_HANDLE);
         const auto swapChainCount = static_cast<std::uint32_t>(m_swapchainImageContexts.back().swapchainImages.size());
-        CHECK(m_descriptorSets.size() == swapChainCount);
-        for (size_t i = 0; i < swapChainCount; ++i)
+        for (size_t i = 0; i < m_descriptorSets.size(); ++i)
         {
             const VkDescriptorImageInfo imageInfo{
                 .sampler = m_videoStreamLayout.textureSampler,

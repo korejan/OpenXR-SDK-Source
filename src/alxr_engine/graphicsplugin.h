@@ -150,6 +150,8 @@ struct IGraphicsPlugin {
     virtual void SetEnableLinearizeRGB(const bool /*enable*/) {}
 
     virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* /*fovDecParm*/) {}
+
+    virtual void SetCmdBufferWaitNextFrame(const bool /*enable*/) {}
 };
 
 // Create a graphics plugin for the graphics API specified in the options.

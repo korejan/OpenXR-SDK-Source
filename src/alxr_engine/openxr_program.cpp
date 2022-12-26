@@ -502,12 +502,12 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
         { XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, false },
         { XR_MSFT_UNBOUNDED_REFERENCE_SPACE_EXTENSION_NAME, false },
-
 #ifndef XR_USE_OXR_OCULUS
         // Quest v46 firmware update added support for this extension which breaks the suggested grip button bindings for touch (pro) profiles...
         // it is not enough to disable the suggested binding, the extension must be disabled completely.
         { XR_MSFT_HAND_INTERACTION_EXTENSION_NAME, false },
 #endif
+        { XR_ML_ML2_CONTROLLER_INTERACTION_EXTENSION_NAME, false },
         { XR_HTC_VIVE_COSMOS_CONTROLLER_INTERACTION_EXTENSION_NAME, false },
         { XR_HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME, false },
         { XR_HTC_HAND_INTERACTION_EXTENSION_NAME, false },
@@ -633,6 +633,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #else
         m_graphicsPlugin->SetEnableLinearizeRGB(!(m_options->DisableLinearizeSrgb || IsRuntime(OxrRuntimeType::HTCWave)));
 #endif
+        m_graphicsPlugin->SetCmdBufferWaitNextFrame(!IsRuntime(OxrRuntimeType::MagicLeap));
     }
 
     void CreateInstanceInternal() {
@@ -735,7 +736,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     using XrEnvironmentBlendModeList = std::vector<XrEnvironmentBlendMode>;
-    XrEnvironmentBlendModeList GetEnvironmentBlendModes(const XrViewConfigurationType type) const
+    XrEnvironmentBlendModeList GetEnvironmentBlendModes(const XrViewConfigurationType type, const bool sortEntries = true) const
     {
         uint32_t count = 0;
         CHECK_XRCMD(xrEnumerateEnvironmentBlendModes(m_instance, m_systemId, type, 0, &count, nullptr));
@@ -743,6 +744,9 @@ struct OpenXrProgram final : IOpenXrProgram {
             return {};
         std::vector<XrEnvironmentBlendMode> blendModes(count, XR_ENVIRONMENT_BLEND_MODE_OPAQUE);
         CHECK_XRCMD(xrEnumerateEnvironmentBlendModes(m_instance, m_systemId, type, count, &count, blendModes.data()));
+        if (sortEntries) {
+            std::sort(blendModes.begin(), blendModes.end());
+        }
         return blendModes;
     }
 
@@ -1914,8 +1918,8 @@ struct OpenXrProgram final : IOpenXrProgram {
                 .baseSpace = m_appSpace,
                 .time = time
             };
-            CHECK_XRCMD(m_pfnLocateHandJointsEXT(handerTracker.tracker, &locateInfo, &locations));
-            if (locations.isActive == XR_FALSE)
+            if (XR_FAILED(m_pfnLocateHandJointsEXT(handerTracker.tracker, &locateInfo, &locations)) ||
+                locations.isActive == XR_FALSE)
                 continue;
 
             const auto& jointLocations = handerTracker.jointLocations;
@@ -2111,6 +2115,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     inline bool LocateViews(const XrTime predictedDisplayTime, const std::uint32_t viewCapacityInput, XrView* views) const
     {
+        if (predictedDisplayTime == 0)
+            return false;
 #ifdef XR_USE_OXR_PICO
         XrViewStatePICOEXT xrViewStatePICOEXT {};
 #endif
@@ -2131,10 +2137,12 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         uint32_t viewCountOutput = 0;
         const XrResult res = xrLocateViews(m_session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, views);
+        if (XR_FAILED(res))
+          return false;
 #ifdef XR_USE_OXR_PICO
         m_gsIndex.store(xrViewStatePICOEXT.gsIndex);
 #endif
-        CHECK_XRRESULT(res, "LocateViews");
+
         if ((viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
             (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0) {
             return false;  // There is no valid tracking poses for the views.
@@ -2597,9 +2605,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         assert(timeStampUs != std::uint64_t(-1) && xrTimeStamp >= 0);
 
         const XrDuration totalLatencyOffsetNs = static_cast<XrDuration>(trackingPredictionLatencyUs * 1000) + predicatedLatencyOffsetNs;
-        const auto predicatedDisplayTimeXR = xrTimeStamp + totalLatencyOffsetNs;
+        const auto predicatedDisplayTimeXR = xrTimeStamp + totalLatencyOffsetNs;      
         const auto predicatedDisplayTimeNs = (timeStampUs * 1000) + static_cast<std::uint64_t>(totalLatencyOffsetNs);
-        
+
         std::array<XrView, 2> newViews { IdentityView, IdentityView };
         LocateViews(predicatedDisplayTimeXR, (const std::uint32_t)newViews.size(), newViews.data());
          {
