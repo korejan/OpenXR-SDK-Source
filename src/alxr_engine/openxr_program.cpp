@@ -1976,6 +1976,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             XrMatrix4x4f_GetRotation(&palmRot, &palmMatP);
             controller.boneRootPosition = ToTrackingVector3(palmPos);
             controller.boneRootOrientation = ToTrackingQuat(palmRot);
+            controller.linearVelocity  = { 0,0,0 };
+            controller.angularVelocity = { 0,0,0 };
         }
     }
 
