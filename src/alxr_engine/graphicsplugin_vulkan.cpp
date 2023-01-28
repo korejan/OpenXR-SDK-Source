@@ -3538,13 +3538,19 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     struct alignas(16) SpecializationData {
         ALXR::FoveatedDecodeParams fdParams;
         VkBool32 enableSRGBLinearize;
+        float alphaValue;     // Blend or Mask mode.
+        XrVector3f keyColour; // Mask Mode only.
     };
     using SpecializationMap = std::vector<VkSpecializationMapEntry>;
-    SpecializationMap MakeSpecializationMap(const bool enableFDParams) const
+    SpecializationMap MakeSpecializationMap
+    (
+        const bool enableFDParams,
+        const PassthroughMode ptMode
+    ) const
     {
         using SDType = SpecializationData;
         static_assert(std::is_standard_layout<SDType>::value);
-        constexpr static const std::array<std::uint32_t, 9> MemberOffsets {
+        constexpr static const std::array<std::uint32_t, 13> MemberOffsets {
             offsetof(SDType, fdParams.eyeSizeRatio.x),
             offsetof(SDType, fdParams.eyeSizeRatio.y),
             offsetof(SDType, fdParams.centerSize.x),
@@ -3553,26 +3559,61 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             offsetof(SDType, fdParams.centerShift.y),
             offsetof(SDType, fdParams.edgeRatio.x),
             offsetof(SDType, fdParams.edgeRatio.y),
-            offsetof(SDType, enableSRGBLinearize)
+            offsetof(SDType, enableSRGBLinearize),
+            offsetof(SDType, alphaValue),
+            offsetof(SDType, keyColour.x),
+            offsetof(SDType, keyColour.y),
+            offsetof(SDType, keyColour.z),
         };
-        const std::size_t mapCount = enableFDParams ? MemberOffsets.size() : 1;
+        std::uint32_t memberOffsetPos = 0;
         SpecializationMap specializationEMap{};
-        specializationEMap.reserve(mapCount);
+        specializationEMap.reserve(MemberOffsets.size());
         if (enableFDParams) {
-            for (std::uint32_t const_id = 0; const_id < (MemberOffsets.size()-1); ++const_id) {
+            for (; memberOffsetPos < 8u; ++memberOffsetPos) {
+                assert(memberOffsetPos < MemberOffsets.size());
                 specializationEMap.push_back({
-                    .constantID = const_id,
-                    .offset = MemberOffsets[const_id],
+                    .constantID = memberOffsetPos,
+                    .offset = MemberOffsets[memberOffsetPos],
                     .size = sizeof(float)
-                });
+                    });
             }
+        } else {
+            memberOffsetPos = 8;
         }
-        const std::uint32_t constID = static_cast<std::uint32_t>(MemberOffsets.size() - 1);
+
+        const std::uint32_t constID = memberOffsetPos++;
+        assert(memberOffsetPos < MemberOffsets.size());
         specializationEMap.push_back({
             .constantID = constID,
             .offset = MemberOffsets[constID],
             .size = sizeof(VkBool32)
         });
+
+        switch (ptMode) {
+            case PassthroughMode::MaskLayer:
+            case PassthroughMode::BlendLayer:
+            {
+                const std::uint32_t constID = memberOffsetPos++;
+                assert(memberOffsetPos < MemberOffsets.size());
+                specializationEMap.push_back({
+                    .constantID = constID,
+                    .offset = MemberOffsets[constID],
+                    .size = sizeof(float)
+                });
+                break;
+            }
+        }
+
+        if (ptMode == PassthroughMode::MaskLayer) {
+            for (; memberOffsetPos < MemberOffsets.size(); ++memberOffsetPos) {
+                specializationEMap.push_back({
+                    .constantID = memberOffsetPos,
+                    .offset = MemberOffsets[memberOffsetPos],
+                    .size = sizeof(float)
+                });
+            }
+        }
+
         return specializationEMap;
     }
 
@@ -3584,19 +3625,6 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         m_videoStreamLayout.CreateVideoStreamLayout(conversionInfo, m_vkDevice, m_vkInstance, m_isMultiViewSupported);
                 
         const auto fovDecodeParamPtr = m_fovDecodeParams;
-        const SpecializationData specializationConst {
-            .fdParams = fovDecodeParamPtr ? *fovDecodeParamPtr : ALXR::FoveatedDecodeParams{},
-            .enableSRGBLinearize = m_enableSRGBLinearize
-        };
-        const auto specializationMap = MakeSpecializationMap(fovDecodeParamPtr != nullptr);
-        assert(!specializationMap.empty());
-        const VkSpecializationInfo speicalizationInfo{
-            .mapEntryCount = (std::uint32_t)specializationMap.size(),
-            .pMapEntries = specializationMap.data(),
-            .dataSize = sizeof(specializationConst),
-            .pData = &specializationConst
-        };
-
         const auto shaderType = fovDecodeParamPtr ?
             VideoFragShaderType::FoveatedDecode :
             VideoFragShaderType::Normal;
@@ -3606,8 +3634,27 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         std::size_t pipelineIdx = 0;
         auto& shaderList = m_videoShaders[shaderType];
         assert(shaderList.size() <= m_videoStreamPipelines.size());
-        for (auto& videoShader : shaderList) {
+        for (std::size_t videoShaderIdx = 0; videoShaderIdx < shaderList.size(); ++videoShaderIdx) {
+            auto& videoShader = shaderList[videoShaderIdx];
             auto& fragShaderInfo = videoShader.shaderInfo[1];
+
+            const auto passthroughMode = static_cast<PassthroughMode>(videoShaderIdx);
+            const SpecializationData specializationConst{
+                .fdParams = fovDecodeParamPtr ? *fovDecodeParamPtr : ALXR::FoveatedDecodeParams{},
+                .enableSRGBLinearize = m_enableSRGBLinearize,
+                .alphaValue = passthroughMode == PassthroughMode::BlendLayer ? m_blendModeAlpha : m_maskModeAlpha,
+                .keyColour  = m_maskModeKeyColor
+            };
+
+            const auto specializationMap = MakeSpecializationMap(fovDecodeParamPtr != nullptr, passthroughMode);
+            assert(!specializationMap.empty());
+            const VkSpecializationInfo speicalizationInfo{
+                .mapEntryCount = (std::uint32_t)specializationMap.size(),
+                .pMapEntries = specializationMap.data(),
+                .dataSize = sizeof(specializationConst),
+                .pData = &specializationConst
+            };
+
             fragShaderInfo.pSpecializationInfo = &speicalizationInfo;
             m_videoStreamPipelines[pipelineIdx++].Create
             (
@@ -3659,6 +3706,22 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     virtual void SetCmdBufferWaitNextFrame(const bool enable) override {
         m_cmdBufferWaitNextFrame = enable;
     }
+
+    virtual void SetMaskModeParams
+    (
+        const XrVector3f& keyColour /*= { 0.01f, 0.01f, 0.01f }*/,
+        const float alpha /*= 0.3f*/
+    ) override
+    {
+        m_maskModeKeyColor = keyColour;
+        m_maskModeAlpha = alpha;
+    }
+
+    virtual void SetBlendModeParams(const float alpha /*= 0.6f*/) override
+    {
+        m_blendModeAlpha = alpha;
+    }
+
 
     constexpr static const std::size_t VideoQueueSize = 2;
 
@@ -4337,7 +4400,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         });
     }
 
-    inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
+    virtual inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) override {
         m_clearColorIndex = (newMode - 1);
     }
 
@@ -4407,6 +4470,10 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     using FoveatedDecodeParamsPtr = std::shared_ptr<ALXR::FoveatedDecodeParams>;
     FoveatedDecodeParamsPtr m_fovDecodeParams{};
+
+    XrVector3f m_maskModeKeyColor = { 0.01f, 0.01f, 0.01f };
+    float      m_maskModeAlpha = 0.3f;
+    float      m_blendModeAlpha = 0.6f;
 
     bool m_cmdBufferWaitNextFrame = true;
 

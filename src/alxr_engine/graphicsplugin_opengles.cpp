@@ -346,7 +346,7 @@ struct OpenGLESGraphicsPlugin : public IGraphicsPlugin {
 
     uint32_t GetSupportedSwapchainSampleCount(const XrViewConfigurationView&) override { return 1; }
 
-    inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
+    virtual inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) override {
         m_clearColorIndex = (newMode - 1);
     }
 

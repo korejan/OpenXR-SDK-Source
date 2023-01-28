@@ -11,6 +11,7 @@
 #ifdef ENABLE_MULTIVEW_EXT
     #extension GL_EXT_multiview : enable
 #endif
+precision highp float;
 
 #include "sRGBLinearize.glsl"
 #ifdef ENABLE_FOVEATION_DECODE

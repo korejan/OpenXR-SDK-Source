@@ -20,19 +20,17 @@ float3 ConvertYUVtoRGB(float3 yuv)
     return saturate(yuv);
 }
 
-float sRGBToLinearRGBScalar(float x)
+// conversion based on: https://www.khronos.org/registry/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_SRGB
+float3 sRGBToLinearRGB(float3 srgb)
 {
     static const float delta = 1.0 / 12.92;
     static const float alpha = 1.0 / 1.055;
-    return (x < 0.04045) ?
-        (x * delta) : pow(((x + 0.055) * alpha), 2.4);
-}
-
-// conversion based on: https://www.khronos.org/registry/DataFormat/specs/1.3/dataformat.1.3.html#TRANSFER_SRGB
-float3 sRGBToLinearRGB(float3 lrgb)
-{
-    const float r = sRGBToLinearRGBScalar(lrgb.r);
-    const float g = sRGBToLinearRGBScalar(lrgb.g);
-    const float b = sRGBToLinearRGBScalar(lrgb.b);
-    return float3(r, g, b);
+    static const float3 delta3  = float3(delta, delta, delta);
+    static const float3 alpha3  = float3(alpha, alpha, alpha);
+    static const float3 theta3  = float3(0.04045, 0.04045, 0.04045);
+    static const float3 offset3 = float3(0.055, 0.055, 0.055);
+    static const float3 gamma3  = float3(2.4, 2.4, 2.4);
+    const float3 lower = srgb * delta3;
+    const float3 upper = pow((srgb + offset3) * alpha3, gamma3);
+    return lerp(upper, lower, srgb < theta3);
 }

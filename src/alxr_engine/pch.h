@@ -116,6 +116,24 @@
 #include <openxr/fb_face_tracking.h>
 #include <openxr/meta_local_dimming.h>
 #endif
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
 #include <openxr/openxr_pico.h>
+
+#ifdef XR_USE_OXR_PICO
+    // These are no longer declared/defined in the Pico OpenXR SDK v2.1.0.
+	#ifndef XR_PICO_BOUNDARY_EXT_EXTENSION_NAME
+		#define XR_PICO_BOUNDARY_EXT_EXTENSION_NAME "XR_PICO_boundary_ext"
+	#endif
+    typedef enum xrFuncitonName {
+        XR_SET_SEETHROUGH_BACKGROUND = 15,
+    } xrFuncitonName;
+    typedef XrResult(XRAPI_PTR* PFN_xrInvokeFunctionsPICO)(
+        XrSession                                 session,
+        xrFuncitonName                            name,
+        void* input,
+        unsigned int                              size_in,
+        void** output,
+        unsigned int                              size_out);
+#endif
+
 #endif

@@ -152,6 +152,16 @@ struct IGraphicsPlugin {
     virtual void SetFoveatedDecode(const ALXR::FoveatedDecodeParams* /*fovDecParm*/) {}
 
     virtual void SetCmdBufferWaitNextFrame(const bool /*enable*/) {}
+
+    virtual void SetEnvironmentBlendMode(const XrEnvironmentBlendMode /*newMode*/) {}
+
+    virtual void SetMaskModeParams
+    (
+        const XrVector3f& /*keyColour*/ = { 0.01f, 0.01f, 0.01f },
+        const float /*alpha*/ = 0.3f
+    ) {}
+
+    virtual void SetBlendModeParams(const float /*alpha*/ = 0.6f) {}
 };
 
 // Create a graphics plugin for the graphics API specified in the options.

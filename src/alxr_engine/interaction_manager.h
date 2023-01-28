@@ -134,7 +134,7 @@ private:
     XrInstance m_instance { XR_NULL_HANDLE };
     XrSession  m_session  { XR_NULL_HANDLE };
     TogglePTModeFn m_togglePTMode{};
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
     PFN_xrVibrateControllerPico m_pfnXrVibrateControllerPico { nullptr };
 #endif
 

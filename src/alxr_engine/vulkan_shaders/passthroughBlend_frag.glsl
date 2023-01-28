@@ -9,9 +9,11 @@
 
 #include "common/baseVideoFrag.glsl"
 
+layout(constant_id = 9) const float AlphaValue = 0.6f;
+
 layout(location = 0) out vec4 FragColor;
 
 void main()
 {
-    FragColor = vec4(SampleVideoTexture().rgb, 0.6f);
+    FragColor = vec4(SampleVideoTexture().rgb, AlphaValue);
 }

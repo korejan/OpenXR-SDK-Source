@@ -12,6 +12,7 @@
 #include "graphicsplugin.h"
 #include "openxr_program.h"
 #include <common/xr_linear.h>
+#include <type_traits>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -515,7 +516,14 @@ struct OpenXrProgram final : IOpenXrProgram {
 #ifdef XR_USE_PLATFORM_WIN32
         { XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME, false },
 #endif
+
+#ifndef XR_USE_OXR_PICO_ANY_VERSION
+    // Pico's current implementation of XR_EXT_hand_tracking has bugs:
+    //  * Does not work stage reference spaces.
+    //  * Joint pose orienations are incorrect and/or in a wrong space.
         { XR_EXT_HAND_TRACKING_EXTENSION_NAME, false },
+#endif
+
         { XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME, false },
         { XR_FB_COLOR_SPACE_EXTENSION_NAME, false },
         { XR_FB_PASSTHROUGH_EXTENSION_NAME, false },
@@ -526,8 +534,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
         { XR_META_LOCAL_DIMMING_EXTENSION_NAME, false },
 #endif
-#ifdef XR_USE_OXR_PICO
-#pragma message ("Pico Neo 3 OXR Extensions Enabled.")
+#ifdef XR_USE_OXR_PICO_V4
+#pragma message ("Pico 4.7.x OXR Extensions Enabled.")
         { XR_PICO_PERFORMANCE_SETTINGS_EXTENSION_NAME, false },
         { XR_PICO_VIEW_STATE_EXT_ENABLE_EXTENSION_NAME, false },
         { XR_PICO_FRAME_END_INFO_EXT_EXTENSION_NAME, false },
@@ -535,7 +543,11 @@ struct OpenXrProgram final : IOpenXrProgram {
         { XR_PICO_CONFIGS_EXT_EXTENSION_NAME, false },
         { XR_PICO_RESET_SENSOR_EXTENSION_NAME, false },
         { XR_PICO_SESSION_BEGIN_INFO_EXT_ENABLE_EXTENSION_NAME, false },
-        { XR_PICO_SINGLEPASS_ENABLE_EXTENSION_NAME, false }
+        { XR_PICO_SINGLEPASS_ENABLE_EXTENSION_NAME, false },
+#endif
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+        { XR_PICO_BOUNDARY_EXT_EXTENSION_NAME, false },
+        { "XR_PICO_boundary", false },
 #endif
     };
     ExtensionMap m_supportedGraphicsContexts = {
@@ -628,8 +640,10 @@ struct OpenXrProgram final : IOpenXrProgram {
             GetXrVersionString(instanceProperties.runtimeVersion).c_str()));
 
         m_runtimeType = FromString(instanceProperties.runtimeName);
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
         m_graphicsPlugin->SetEnableLinearizeRGB(false);
+        m_graphicsPlugin->SetMaskModeParams({ 0.11f, 0.11f, 0.11f });
+        m_graphicsPlugin->SetBlendModeParams(0.62f);
 #else
         m_graphicsPlugin->SetEnableLinearizeRGB(!(m_options->DisableLinearizeSrgb || IsRuntime(OxrRuntimeType::HTCWave)));
 #endif
@@ -904,9 +918,22 @@ struct OpenXrProgram final : IOpenXrProgram {
         struct timespec ts;
         if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
             return { -1, std::uint64_t(-1) };
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+#pragma message("Using Pico runtime bug workaround for time conversion.")
+        // 
+        // As of writing, there are bugs in Pico's OXR runtime with either/both:
+        //      * xrLocateSpace for controller action spaces not working with any other times beyond XrFrameState::predicateDisplayTime (and zero, in a non-conforming way).
+        //      * xrConvertTimeToTimespecTimeKHR appears to return values in microseconds instead of nanoseconds and values seem to be completely off from what
+        //        XrFrameState::predicateDisplayTime values are.   
+        //
+        static_assert(sizeof(XrTime) == sizeof(std::int64_t) && std::is_signed< XrTime>::value);
+        constexpr const auto NSecPerSec = 1000000000L;
+        const XrTime xrTimeNow = (static_cast<XrTime>(ts.tv_sec) * NSecPerSec) + ts.tv_nsec;
+#else
         XrTime xrTimeNow;
         if (m_pfnConvertTimespecTimeToTimeKHR(m_instance, &ts, &xrTimeNow) == XR_ERROR_TIME_INVALID)
             return { -1, std::uint64_t(-1) };
+#endif
         return { xrTimeNow, ToTimeUs(ts) };
 #endif
     }
@@ -1004,7 +1031,7 @@ struct OpenXrProgram final : IOpenXrProgram {
                 reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnRequestDisplayRefreshRateFB)));
         }
 
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
         const auto GetPicoInstanceProcAddr = [this](const char* const name, auto& fn)
         {
             const XrResult result = xrGetInstanceProcAddr(m_instance, name, reinterpret_cast<PFN_xrVoidFunction*>(&fn));
@@ -1013,6 +1040,12 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         };
 
+        if (IsExtEnabled("XR_PICO_boundary") || IsExtEnabled(XR_PICO_BOUNDARY_EXT_EXTENSION_NAME)) {
+            Log::Write(Log::Level::Info, Fmt("%s enabled.", "XR_PICO_boundary(_ext)"));
+            GetPicoInstanceProcAddr("xrInvokeFunctionsPICO", m_pfnInvokeFunctionsPICO);
+        }
+#endif
+#ifdef XR_USE_OXR_PICO_V4
         if (IsExtEnabled(XR_PICO_ANDROID_CONTROLLER_FUNCTION_EXT_ENABLE_EXTENSION_NAME))
         {
             Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_PICO_ANDROID_CONTROLLER_FUNCTION_EXT_ENABLE_EXTENSION_NAME));
@@ -1239,7 +1272,11 @@ struct OpenXrProgram final : IOpenXrProgram {
         //    return false;
 
         // Inspect hand tracking system properties
-        XrSystemHandTrackingPropertiesEXT handTrackingSystemProperties{ .type=XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT, .next=nullptr };
+        XrSystemHandTrackingPropertiesEXT handTrackingSystemProperties{ 
+            .type = XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
+            .next = nullptr,
+            .supportsHandTracking = XR_FALSE
+        };
         XrSystemProperties systemProperties{ .type=XR_TYPE_SYSTEM_PROPERTIES, .next = &handTrackingSystemProperties };
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (!handTrackingSystemProperties.supportsHandTracking) {
@@ -1300,7 +1337,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         XrSystemPassthroughPropertiesFB passthroughSystemProperties{
             .type = XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB,
-            .next = nullptr
+            .next = nullptr,
+            .supportsPassthrough = XR_FALSE
         };
         XrSystemProperties systemProperties{
             .type = XR_TYPE_SYSTEM_PROPERTIES,
@@ -1357,7 +1395,13 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     inline bool IsPassthroughSupported() const {
-        return m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE;
+        if (m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE)
+            return true;
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+        if (m_pfnInvokeFunctionsPICO != nullptr)
+            return true;
+#endif
+        return false;
     }
 
     std::atomic<ALXR::PassthroughMode> m_currentPTMode{ ALXR::PassthroughMode::None };
@@ -1365,20 +1409,59 @@ struct OpenXrProgram final : IOpenXrProgram {
         return m_currentPTMode.load() != ALXR::PassthroughMode::None;
     }
 
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+    bool SetPICOSeeThroughBackground(const bool enable) {
+        if (m_session == XR_NULL_HANDLE ||
+            m_pfnInvokeFunctionsPICO == nullptr)
+            return false;
+
+        const auto graphicsPluginPtr = m_graphicsPlugin;
+        if (graphicsPluginPtr == nullptr)
+            return false;
+
+        // When enabled, clear color must be rgba == 0x00000000 (same as additive blend mode).
+        const auto newBlendMode = enable ?
+            XR_ENVIRONMENT_BLEND_MODE_ADDITIVE : m_environmentBlendMode;
+        graphicsPluginPtr->SetEnvironmentBlendMode(newBlendMode);
+
+        XrBool32 enableSeethroughBackground = enable ? XR_TRUE : XR_FALSE;
+        return m_pfnInvokeFunctionsPICO
+        (
+            m_session,
+            XR_SET_SEETHROUGH_BACKGROUND,
+            &enableSeethroughBackground,
+            sizeof(enableSeethroughBackground),
+            nullptr, 0
+        ) == XR_SUCCESS;
+    }
+#endif
+
     void StartPassthroughMode() {
         if (!IsPassthroughSupported())
             return;
-        CHECK_XRCMD(m_pfnPassthroughStartFB(m_ptLayerData.passthrough));
-        CHECK_XRCMD(m_pfnPassthroughLayerResumeFB(m_ptLayerData.reconPassthroughLayer));
-        Log::Write(Log::Level::Info, "Passthrough (Layer) is started/resumed.");
 
-        constexpr const XrPassthroughStyleFB style {
-            .type = XR_TYPE_PASSTHROUGH_STYLE_FB,
-            .next = nullptr,
-            .textureOpacityFactor = 0.5f,
-            .edgeColor = { 0.0f, 0.0f, 0.0f, 0.0f },
-        };
-        CHECK_XRCMD(m_pfnPassthroughLayerSetStyleFB(m_ptLayerData.reconPassthroughLayer, &style));
+        if (m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE) {
+            CHECK_XRCMD(m_pfnPassthroughStartFB(m_ptLayerData.passthrough));
+            CHECK_XRCMD(m_pfnPassthroughLayerResumeFB(m_ptLayerData.reconPassthroughLayer));
+            Log::Write(Log::Level::Info, "Passthrough (Layer) is started/resumed.");
+
+            constexpr const XrPassthroughStyleFB style{
+                .type = XR_TYPE_PASSTHROUGH_STYLE_FB,
+                .next = nullptr,
+                .textureOpacityFactor = 0.5f,
+                .edgeColor = { 0.0f, 0.0f, 0.0f, 0.0f },
+            };
+            CHECK_XRCMD(m_pfnPassthroughLayerSetStyleFB(m_ptLayerData.reconPassthroughLayer, &style));
+            return;
+        }
+
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+        if (m_pfnInvokeFunctionsPICO) {
+            SetPICOSeeThroughBackground(true);
+            Log::Write(Log::Level::Info, "Passthrough (Layer) is started/resumed.");
+            return;
+        }
+#endif
     }
 
     void StopPassthroughMode() {
@@ -1388,8 +1471,17 @@ struct OpenXrProgram final : IOpenXrProgram {
         m_currentPTMode.store(ALXR::PassthroughMode::None);
     /////////////////////////////////////////////////
         Log::Write(Log::Level::Info, "Passthrough (Layer) is stopped/paused.");
-        CHECK_XRCMD(m_pfnPassthroughLayerPauseFB(m_ptLayerData.reconPassthroughLayer));
-        CHECK_XRCMD(m_pfnPassthroughPauseFB(m_ptLayerData.passthrough));
+        if (m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE) {
+            CHECK_XRCMD(m_pfnPassthroughLayerPauseFB(m_ptLayerData.reconPassthroughLayer));
+            CHECK_XRCMD(m_pfnPassthroughPauseFB(m_ptLayerData.passthrough));
+            return;
+        }
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+        if (m_pfnInvokeFunctionsPICO) {
+            SetPICOSeeThroughBackground(false);
+            return;
+        }
+#endif
     }
 
     void TogglePassthroughMode(const ALXR::PassthroughMode newMode) {
@@ -1422,7 +1514,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             CHECK_XRCMD(setPerfLevel(m_session, XR_PERF_SETTINGS_DOMAIN_CPU_EXT, XR_PERF_SETTINGS_LEVEL_SUSTAINED_HIGH_EXT));
             CHECK_XRCMD(setPerfLevel(m_session, XR_PERF_SETTINGS_DOMAIN_GPU_EXT, XR_PERF_SETTINGS_LEVEL_BOOST_EXT));
         }
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         if (IsExtEnabled(XR_PICO_PERFORMANCE_SETTINGS_EXTENSION_NAME)) {
             PFN_xrSetPerformanceLevelPICO setPerfLevel = nullptr;
             const XrResult result = xrGetInstanceProcAddr
@@ -1828,7 +1920,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
             case XR_SESSION_STATE_READY: {
                 CHECK(m_session != XR_NULL_HANDLE);
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
                 const XrSessionBeginInfoEXT sessionBeginInfoExt {
                     .type = XR_TYPE_SESSION_BEGIN_INFO,
                     .next = nullptr,
@@ -1837,7 +1929,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
                 const XrSessionBeginInfo sessionBeginInfo{
                     .type = XR_TYPE_SESSION_BEGIN_INFO,
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
                     .next = &sessionBeginInfoExt,
 #else
                     .next = nullptr,
@@ -1891,7 +1983,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         std::array<XrMatrix4x4f, XR_HAND_JOINT_COUNT_EXT> oculusOrientedJointPoses;
         for (const auto hand : { Side::LEFT,Side::RIGHT })
         {
-            auto& controller = controllerInfo[hand];//m_input.controllerInfo[hand];
+            auto& controller = controllerInfo[hand];
             // TODO: v17/18 server does not allow for both controller & hand tracking data, this needs changing,
             //       we don't want to override a controller device pose with potentially an emulated pose for
             //       runtimes such as WMR & SteamVR.
@@ -2077,7 +2169,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (timeRender)
             LatencyCollector::Instance().rendered2(videoFrameDisplayTime);
 
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         const XrFrameEndInfoEXT xrFrameEndInfoEXT {
             .type = XR_TYPE_FRAME_END_INFO,
             .next = nullptr,
@@ -2089,7 +2181,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             .type = XR_TYPE_FRAME_END_INFO,
 #ifdef XR_USE_OXR_OCULUS
             .next = &xrLocalDimmingFrameEndInfoMETA,
-#elif defined(XR_USE_OXR_PICO)
+#elif defined(XR_USE_OXR_PICO_V4)
             .next = &xrFrameEndInfoEXT,
 #else
             .next = nullptr,
@@ -2119,12 +2211,12 @@ struct OpenXrProgram final : IOpenXrProgram {
     {
         if (predictedDisplayTime == 0)
             return false;
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         XrViewStatePICOEXT xrViewStatePICOEXT {};
 #endif
         const XrViewLocateInfo viewLocateInfo{
             .type = XR_TYPE_VIEW_LOCATE_INFO,
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
             .next = &xrViewStatePICOEXT,
 #else
             .next = nullptr,
@@ -2141,7 +2233,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         const XrResult res = xrLocateViews(m_session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, views);
         if (XR_FAILED(res))
           return false;
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         m_gsIndex.store(xrViewStatePICOEXT.gsIndex);
 #endif
 
@@ -2158,11 +2250,58 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     using VizCubeList = std::vector<Cube>;
-    VizCubeList GetVisualizedCubes(const XrTime predictedDisplayTime) const {
-        // For each locatable space that we want to visualize, render a 25cm cube.
-        VizCubeList cubes;
+    VizCubeList GetVisualizedHandCubes(const XrTime predictedDisplayTime) /*const*/ {
+
+        if (m_pfnLocateHandJointsEXT == nullptr || predictedDisplayTime == 0)
+            return {};
+
+        VizCubeList handCubes;
+        handCubes.reserve(XR_HAND_JOINT_COUNT_EXT * 2);
+
+        for (const auto hand : { Side::LEFT,Side::RIGHT }) {
+
+            auto& handerTracker = m_input.handerTrackers[hand];
+            XrHandJointLocationsEXT locations{
+                .type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+                .next = nullptr, //&velocities,
+                .isActive = XR_FALSE,
+                .jointCount = XR_HAND_JOINT_COUNT_EXT,
+                .jointLocations = handerTracker.jointLocations.data(),
+            };
+            const XrHandJointsLocateInfoEXT locateInfo{
+                .type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+                .next = nullptr,
+                .baseSpace = m_appSpace,
+                .time = predictedDisplayTime
+            };
+            if (XR_FAILED(m_pfnLocateHandJointsEXT(handerTracker.tracker, &locateInfo, &locations)) ||
+                locations.isActive == XR_FALSE)
+                continue;
+
+            const auto& jointLocations = handerTracker.jointLocations;
+            for (size_t jointIdx = 0; jointIdx < XR_HAND_JOINT_COUNT_EXT; ++jointIdx)
+            {
+                const auto& jointLoc = jointLocations[jointIdx];
+                const auto& newPose = Math::Pose::IsPoseValid(jointLoc) ?
+                    jointLoc.pose : ALXR::IdentityPose;
+                constexpr const float scale = 0.01f;
+                handCubes.push_back(Cube{ newPose, {scale, scale, scale} });
+            }
+        }
+        return handCubes;
+    }
+
+    VizCubeList GetVisualizedCubes(const XrTime predictedDisplayTime) /*const*/ {
+
+        if (predictedDisplayTime == 0)
+            return {};
+
+        auto cubes = GetVisualizedHandCubes(predictedDisplayTime);
+        const bool hasHandCubes = cubes.size() > 0;
+
 #ifdef ALXR_ENGINE_ENABLE_VIZ_SPACES
-        cubes.reserve(m_visualizedSpaces.size() + Side::COUNT);
+        // For each locatable space that we want to visualize, render a 25cm cube.
+        cubes.reserve(cubes.size() + m_visualizedSpaces.size() + Side::COUNT);
         for (XrSpace visualizedSpace : m_visualizedSpaces) {
             XrSpaceLocation spaceLocation{ .type = XR_TYPE_SPACE_LOCATION, .next = nullptr };
             XrResult res = xrLocateSpace(visualizedSpace, m_appSpace, predictedDisplayTime, &spaceLocation);
@@ -2177,9 +2316,9 @@ struct OpenXrProgram final : IOpenXrProgram {
                 Log::Write(Log::Level::Verbose, Fmt("Unable to locate a visualized reference space in app space: %d", res));
             }
         }
-#else
-        cubes.reserve(Side::COUNT);
 #endif
+        if (hasHandCubes)
+            return cubes;
         constexpr const std::array<const float, Side::COUNT> HandScale = { {1.0f, 1.0f} };
         // Render a 10cm cube scaled by grabAction for each hand. Note renderHand will only be
         // true when the application has focus.
@@ -2595,13 +2734,14 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     virtual bool GetTrackingInfo(TrackingInfo& info, const bool clientPredict) /*const*/ override
     {
-        const XrDuration predicatedLatencyOffsetNs = m_PredicatedLatencyOffset.load();
         info = {
             .mounted = true,
             .controller = { m_input.controllerInfo[0], m_input.controllerInfo[1] }
         };
+
+        const XrDuration predicatedLatencyOffsetNs = m_PredicatedLatencyOffset.load();
         assert(predicatedLatencyOffsetNs >= 0);
-        
+
         const auto trackingPredictionLatencyUs = LatencyCollector::Instance().getTrackingPredictionLatency();
         const auto [xrTimeStamp, timeStampUs] = XrTimeNow();
         assert(timeStampUs != std::uint64_t(-1) && xrTimeStamp >= 0);
@@ -2612,16 +2752,15 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         std::array<XrView, 2> newViews { IdentityView, IdentityView };
         LocateViews(predicatedDisplayTimeXR, (const std::uint32_t)newViews.size(), newViews.data());
-         {
-             std::unique_lock<std::shared_mutex> lock(m_trackingFrameMapMutex);
-             m_trackingFrameMap[predicatedDisplayTimeNs] = {
-                 .views       = newViews,
-                 //.timestamp   = predicatedDisplayTimeNs,
-                 .displayTime = predicatedDisplayTimeXR
-             };
-             if (m_trackingFrameMap.size() > MaxTrackingFrameCount)
-                 m_trackingFrameMap.erase(m_trackingFrameMap.begin());
-         }
+        {
+            std::unique_lock<std::shared_mutex> lock(m_trackingFrameMapMutex);
+            m_trackingFrameMap[predicatedDisplayTimeNs] = {
+                .views       = newViews,
+                .displayTime = predicatedDisplayTimeXR
+            };
+            if (m_trackingFrameMap.size() > MaxTrackingFrameCount)
+                m_trackingFrameMap.erase(m_trackingFrameMap.begin());
+        }
         info.targetTimestampNs = predicatedDisplayTimeNs;
         
         const auto hmdSpaceLoc = GetSpaceLocation(m_viewSpace, predicatedDisplayTimeXR);
@@ -2635,19 +2774,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         for (const auto hand : { Side::LEFT, Side::RIGHT }) {
             auto& newContInfo = info.controller[hand];
-#ifdef XR_USE_OXR_PICO
-            // 
-            // As of writing, there are bugs in Pico's OXR runtime with either/both:
-            //      * xrLocateSpace for controller action spaces not working with any other times beyond XrFrameState::predicateDisplayTime (and zero, in a non-conforming way).
-            //      * xrConvertTimeToTimespecTimeKHR appears to return values in microseconds instead of nanoseconds and values seem to be completely of from what
-            //        XrFrameState::predicateDisplayTime values are.   
-            //
-            //  This workaround will induce some small amount of "lag" as the times don't account for network latency and the HMD poses being in future times.
-            //
-            const auto spaceLoc = GetHandSpaceLocation(hand, lastPredicatedDisplayTime);
-#else
             const auto spaceLoc = GetHandSpaceLocation(hand, inputPredicatedTime);
-#endif
+
             newContInfo.position        = ToTrackingVector3(spaceLoc.pose.position);
             newContInfo.orientation     = ToTrackingQuat(spaceLoc.pose.orientation);
             newContInfo.linearVelocity  = ToTrackingVector3(spaceLoc.linearVelocity);
@@ -2883,7 +3011,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         return enqueueGuardianChanged(m_lastPredicatedDisplayTime);
     }
 
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
     enum PxrHmdDof : int
     {
         PXR_HMD_3DOF = 0,
@@ -2897,7 +3025,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
     virtual inline void Resume() override
     {
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         if (m_instance == XR_NULL_HANDLE) {
             Log::Write(Log::Level::Warning, "OpenXrProgram::Resume invoked but an openxr instance not yet set.");
             return;
@@ -2915,7 +3043,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     virtual inline void Pause() override
     {
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
         if (m_instance == XR_NULL_HANDLE) {
             Log::Write(Log::Level::Warning, "OpenXrProgram::Paused invoked but an openxr instance not yet set.");
             return;
@@ -3030,7 +3158,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrPassthroughLayerPauseFB m_pfnPassthroughLayerPauseFB = nullptr;
     PFN_xrPassthroughLayerResumeFB m_pfnPassthroughLayerResumeFB = nullptr;
 
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
     mutable std::atomic<int>    m_gsIndex{ 0 };
     PFN_xrResetSensorPICO       m_pfnResetSensorPICO = nullptr;
     PFN_xrGetConfigPICO         m_pfnGetConfigPICO = nullptr;
@@ -3040,6 +3168,9 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrStartCVControllerThreadPico m_pfnStartCVControllerThreadPico = nullptr;
     PFN_xrStopCVControllerThreadPico  m_pfnStopCVControllerThreadPico = nullptr;
     PFN_xrVibrateControllerPico m_pfnXrVibrateControllerPico = nullptr;
+#endif
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+    PFN_xrInvokeFunctionsPICO m_pfnInvokeFunctionsPICO = nullptr;
 #endif
 #ifdef XR_USE_OXR_OCULUS
     const XrLocalDimmingFrameEndInfoMETA xrLocalDimmingFrameEndInfoMETA;

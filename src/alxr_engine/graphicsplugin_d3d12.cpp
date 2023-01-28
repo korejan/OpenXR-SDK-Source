@@ -1708,7 +1708,7 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         }, RenderPipelineType::Video, newMode);
     }
 
-    inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {
+    virtual inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) override {
         m_clearColorIndex = (newMode - 1);
     }
 

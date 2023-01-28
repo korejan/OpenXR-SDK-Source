@@ -69,15 +69,15 @@ struct InteractionProfile {
 };
 
 using namespace XRPaths;
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_V4
 constexpr inline const std::size_t ProfileMapSize = 1;
-#elif defined(XR_USE_OXR_OCULUS)
+#elif defined(XR_USE_OXR_OCULUS) || defined(XR_USE_OXR_PICO)
 constexpr inline const std::size_t ProfileMapSize = 11;
 #else
 constexpr inline const std::size_t ProfileMapSize = 10;
 #endif
 constexpr inline const std::array<const InteractionProfile, ProfileMapSize> InteractionProfileMap{
-#ifdef XR_USE_OXR_PICO
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
     InteractionProfile {
         .boolMap {
             LeftMap { ButtonMap
@@ -132,10 +132,23 @@ constexpr inline const std::array<const InteractionProfile, ProfileMapSize> Inte
             }
         },
         .path = "/interaction_profiles/pico/neo3_controller",
+#ifdef XR_USE_OXR_PICO_V4
         .extensionName = XR_PICO_ANDROID_CONTROLLER_FUNCTION_EXT_ENABLE_EXTENSION_NAME,
-        .quitPath = nullptr
+#endif
+        .quitPath = nullptr,
+        .passthroughModes { PassthroughModeButtons {
+            .blendMode {
+                ALVR_BUTTON_FLAG(ALVR_INPUT_SYSTEM_CLICK),
+                ALVR_BUTTON_FLAG(ALVR_INPUT_A_CLICK)
+            },
+            .maskMode {
+                ALVR_BUTTON_FLAG(ALVR_INPUT_SYSTEM_CLICK),
+                ALVR_BUTTON_FLAG(ALVR_INPUT_B_CLICK)
+            }
+        }}
     },
-#else
+#endif
+#ifndef XR_USE_OXR_PICO_V4
     InteractionProfile {
         .boolMap {
             LeftMap { ButtonMap
