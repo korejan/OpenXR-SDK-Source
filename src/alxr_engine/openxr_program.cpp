@@ -407,6 +407,13 @@ struct OpenXrProgram final : IOpenXrProgram {
             m_ptLayerData.passthrough = XR_NULL_HANDLE;
         }
 
+        if (m_ptLayerData.passthroughHTC != XR_NULL_HANDLE) {
+            Log::Write(Log::Level::Verbose, "Destroying HTC Passthrough");
+            assert(m_pfnDestroyPassthroughHTC);
+            m_pfnDestroyPassthroughHTC(m_ptLayerData.passthroughHTC);
+            m_ptLayerData.passthroughHTC = XR_NULL_HANDLE;
+        }
+
         if (m_pfnDestroyHandTrackerEXT != nullptr)
         {
             Log::Write(Log::Level::Verbose, "Destroying HandTrackers");
@@ -516,6 +523,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #ifdef XR_USE_PLATFORM_WIN32
         { XR_KHR_WIN32_CONVERT_PERFORMANCE_COUNTER_TIME_EXTENSION_NAME, false },
 #endif
+        { XR_HTC_PASSTHROUGH_EXTENSION_NAME, false },
 
 #ifndef XR_USE_OXR_PICO_ANY_VERSION
     // Pico's current implementation of XR_EXT_hand_tracking has bugs:
@@ -1327,12 +1335,12 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-    void InitializePassthroughAPI()
+    bool InitializeFBPassthroughAPI()
     {
         if (m_instance == XR_NULL_HANDLE ||
             m_systemId == XR_NULL_SYSTEM_ID ||
             !IsExtEnabled(XR_FB_PASSTHROUGH_EXTENSION_NAME)) {
-            return;
+            return false;
         }
 
         XrSystemPassthroughPropertiesFB passthroughSystemProperties{
@@ -1347,7 +1355,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (passthroughSystemProperties.supportsPassthrough == XR_FALSE) {
             Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
-            return;
+            return false;
         }
         Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
 
@@ -1375,7 +1383,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (XR_FAILED(m_pfnCreatePassthroughFB(m_session, &ptci, &m_ptLayerData.passthrough))) {
             Log::Write(Log::Level::Error, "Failed to create passthrough object!");
             m_ptLayerData = {};
-            return;
+            return false;
         }
 
         const XrPassthroughLayerCreateInfoFB plci {
@@ -1387,11 +1395,43 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (XR_FAILED(m_pfnCreatePassthroughLayerFB(m_session, &plci, &m_ptLayerData.reconPassthroughLayer))) {
             Log::Write(Log::Level::Error, "Failed to create passthrough layer!");
             m_ptLayerData = {};
-            return;
+            return false;
         }
         CHECK(m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE);
 
         Log::Write(Log::Level::Info, "Passthrough API is initialized.");
+        return true;
+    }
+
+    bool InitializeHTCPassthroughAPI()
+    {
+        if (m_instance == XR_NULL_HANDLE ||
+            m_systemId == XR_NULL_SYSTEM_ID ||
+            !IsExtEnabled(XR_HTC_PASSTHROUGH_EXTENSION_NAME)) {
+            return false;
+        }
+
+        Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
+
+#define CAT(x,y) x ## y
+#define INIT_PFN(ExtName)\
+    CHECK_XRCMD(xrGetInstanceProcAddr(m_instance, "xr"#ExtName, reinterpret_cast<PFN_xrVoidFunction*>(&CAT(m_pfn,ExtName))));
+
+        INIT_PFN(CreatePassthroughHTC);
+        INIT_PFN(DestroyPassthroughHTC);
+
+#undef INIT_PFN
+#undef CAT
+        CHECK(m_pfnCreatePassthroughHTC != nullptr);
+
+        Log::Write(Log::Level::Info, "HTC Passthrough API is initialized.");
+        return true;
+    }
+
+    void InitializePassthroughAPI() {
+        if (InitializeFBPassthroughAPI())
+            return;
+        InitializeHTCPassthroughAPI();
     }
 
     inline bool IsPassthroughSupported() const {
@@ -1401,6 +1441,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_pfnInvokeFunctionsPICO != nullptr)
             return true;
 #endif
+        if (m_pfnCreatePassthroughHTC != nullptr)
+            return true;
         return false;
     }
 
@@ -1462,6 +1504,16 @@ struct OpenXrProgram final : IOpenXrProgram {
             return;
         }
 #endif
+
+        if (m_ptLayerData.passthroughHTC == XR_NULL_HANDLE) {
+            constexpr const XrPassthroughCreateInfoHTC createInfo {
+                .type = XR_TYPE_PASSTHROUGH_CREATE_INFO_HTC,
+                .next = nullptr,
+                .form = XR_PASSTHROUGH_FORM_PLANAR_HTC,
+            };
+            assert(m_pfnCreatePassthroughHTC != nullptr);
+            CHECK_XRCMD(m_pfnCreatePassthroughHTC(m_session, &createInfo, &m_ptLayerData.passthroughHTC));
+        }
     }
 
     void StopPassthroughMode() {
@@ -1474,6 +1526,12 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE) {
             CHECK_XRCMD(m_pfnPassthroughLayerPauseFB(m_ptLayerData.reconPassthroughLayer));
             CHECK_XRCMD(m_pfnPassthroughPauseFB(m_ptLayerData.passthrough));
+            return;
+        }
+        if (m_ptLayerData.passthroughHTC != XR_NULL_HANDLE) {
+            assert(m_pfnDestroyPassthroughHTC != nullptr);
+            CHECK_XRCMD(m_pfnDestroyPassthroughHTC(m_ptLayerData.passthroughHTC));
+            m_ptLayerData.passthroughHTC = XR_NULL_HANDLE;
             return;
         }
 #ifdef XR_USE_OXR_PICO_ANY_VERSION
@@ -2102,6 +2160,32 @@ struct OpenXrProgram final : IOpenXrProgram {
                !IsRuntime(OxrRuntimeType::Monado);
     }
 
+    inline XrCompositionLayerPassthroughFB MakeCompositionLayerPassthroughFB() const {
+        return {
+            .type  = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB,
+            .next  = nullptr,
+            .flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+            .space = XR_NULL_HANDLE,
+            .layerHandle = m_ptLayerData.reconPassthroughLayer,
+        };
+    }
+
+    inline XrCompositionLayerPassthroughHTC MakeCompositionLayerPassthroughHTC() const {
+        static constexpr const XrPassthroughColorHTC ptColor {
+            .type = XR_TYPE_PASSTHROUGH_COLOR_HTC,
+            .next = nullptr,
+            .alpha = 0.5f
+        };
+        return XrCompositionLayerPassthroughHTC {
+            .type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_HTC,
+            .next = nullptr,
+            .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+            .space = XR_NULL_HANDLE,
+            .passthrough = m_ptLayerData.passthroughHTC,
+            .color = ptColor
+        };
+    }
+
     void RenderFrame() override {
         CHECK(m_session != XR_NULL_HANDLE);
         constexpr const XrFrameWaitInfo frameWaitInfo{
@@ -2138,8 +2222,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(xrBeginFrame(m_session, &frameBeginInfo));
 
-        XrCompositionLayerPassthroughFB passthroughLayer;
-        XrCompositionLayerProjection    layer;
+        XrCompositionLayerPassthroughFB  passthroughLayer;
+        XrCompositionLayerPassthroughHTC passthroughLayerHTC;
+        XrCompositionLayerProjection     layer;
         std::uint32_t layerCount = 0;
         std::array<const XrCompositionLayerBaseHeader*, 2> layers{};
         std::array<XrCompositionLayerProjectionView,2> projectionLayerViews;
@@ -2147,17 +2232,17 @@ struct OpenXrProgram final : IOpenXrProgram {
         {
             XrCompositionLayerFlags ptRenderLayerFlags = 0;
             const auto passthroughMode = m_currentPTMode.load();
-            if (passthroughMode != ALXR::PassthroughMode::None &&
-                m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE) {
-                passthroughLayer = {
-                    .type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB,
-                    .next = nullptr,
-                    .flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
-                    .space = XR_NULL_HANDLE,
-                    .layerHandle = m_ptLayerData.reconPassthroughLayer,
-                };
-                layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&passthroughLayer);
-                ptRenderLayerFlags = XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+            if (passthroughMode != ALXR::PassthroughMode::None) {
+                if (m_ptLayerData.reconPassthroughLayer != XR_NULL_HANDLE) {
+                    passthroughLayer = MakeCompositionLayerPassthroughFB();
+                    layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&passthroughLayer);
+                    ptRenderLayerFlags = XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                }
+                if (m_ptLayerData.passthroughHTC != XR_NULL_HANDLE) {
+                    passthroughLayerHTC = MakeCompositionLayerPassthroughHTC();
+                    layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&passthroughLayerHTC);
+                    ptRenderLayerFlags = XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+                }
             }
             const std::span<const XrView> views { predictedViews.begin(), predictedViews.end() };
             if (RenderLayer(predictedDisplayTime, views, projectionLayerViews, layer, passthroughMode)) {
@@ -3120,6 +3205,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     struct PassthroughLayerData
     {
         XrPassthroughFB passthrough = XR_NULL_HANDLE;
+        XrPassthroughHTC passthroughHTC = XR_NULL_HANDLE;
         XrPassthroughLayerFB reconPassthroughLayer = XR_NULL_HANDLE;
     };
     PassthroughLayerData m_ptLayerData {};
@@ -3157,6 +3243,10 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrPassthroughLayerSetStyleFB m_pfnPassthroughLayerSetStyleFB = nullptr;
     PFN_xrPassthroughLayerPauseFB m_pfnPassthroughLayerPauseFB = nullptr;
     PFN_xrPassthroughLayerResumeFB m_pfnPassthroughLayerResumeFB = nullptr;
+
+    // XR_HTC_PASSTHROUGH_EXTENSION fun pointers.
+    PFN_xrCreatePassthroughHTC  m_pfnCreatePassthroughHTC = nullptr;
+    PFN_xrDestroyPassthroughHTC m_pfnDestroyPassthroughHTC = nullptr;
 
 #ifdef XR_USE_OXR_PICO_V4
     mutable std::atomic<int>    m_gsIndex{ 0 };

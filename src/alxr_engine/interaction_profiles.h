@@ -524,7 +524,17 @@ constexpr inline const std::array<const InteractionProfile, ProfileMapSize> Inte
         },
         .path = "/interaction_profiles/htc/vive_focus3_controller",
         .extensionName = XR_HTC_VIVE_FOCUS3_CONTROLLER_INTERACTION_EXTENSION_NAME,
-        .quitPath = nullptr
+        .quitPath = nullptr,
+        .passthroughModes { PassthroughModeButtons {
+            .blendMode {
+                ALVR_BUTTON_FLAG(ALVR_INPUT_SYSTEM_CLICK),
+                ALVR_BUTTON_FLAG(ALVR_INPUT_A_CLICK)
+            },
+            .maskMode {
+                ALVR_BUTTON_FLAG(ALVR_INPUT_SYSTEM_CLICK),
+                ALVR_BUTTON_FLAG(ALVR_INPUT_B_CLICK)
+            }
+        }}
     },
     InteractionProfile {
         .scalarMap {
