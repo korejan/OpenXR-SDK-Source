@@ -28,6 +28,9 @@ if(NOT MSVC)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif()
 
+# make cache variables for install destinations
+include(GNUInstallDirs)
+
 # List of all files externally generated outside of the loader that the loader
 # needs to build with.
 set(LOADER_EXTERNAL_GEN_FILES ${COMMON_GENERATED_OUTPUT})
@@ -38,7 +41,7 @@ run_xr_xml_generate(loader_source_generator.py xr_generated_loader.cpp)
 if(DYNAMIC_LOADER)
     add_definitions(-DXRAPI_DLL_EXPORT)
     set(LIBRARY_TYPE SHARED)
-    if(WIN32)
+    if(MSVC)
         list(APPEND openxr_loader_RESOURCE_FILE ${CMAKE_CURRENT_SOURCE_DIR}/openxr-loader.def)
     endif()
 else() # build static lib
@@ -87,6 +90,10 @@ else()
         target_compile_options(openxr_loader PRIVATE -Wno-unused-parameter)
     endif()
 endif()
+if(BUILD_WITH_WAYLAND_HEADERS)
+    target_include_directories(openxr_loader PRIVATE ${WAYLAND_CLIENT_INCLUDE_DIRS})
+endif()
+
 set_target_properties(openxr_loader PROPERTIES FOLDER ${LOADER_FOLDER})
 
 if(LOADER_EXTERNAL_GEN_DEPENDS)
@@ -108,7 +115,7 @@ target_include_directories(
             # for target-specific generated files
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_BINARY_DIR}
-    INTERFACE $<INSTALL_INTERFACE:include>
+    INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(Vulkan_FOUND)
@@ -277,7 +284,7 @@ if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER_ID MATCHES "Clang")
 endif()
 
 add_library(headers INTERFACE)
-target_include_directories(headers INTERFACE $<INSTALL_INTERFACE:include>)
+target_include_directories(headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # We will never actually install here, but it's easier to set something than block all install code.
 if(ANDROID AND NOT INSTALL_TO_ARCHITECTURE_PREFIXES)
@@ -332,7 +339,7 @@ install(
     COMPONENT CMakeConfigs
 )
 
-if(WIN32 AND DYNAMIC_LOADER)
+if(WIN32 AND NOT MINGW AND DYNAMIC_LOADER)
     install(FILES $<TARGET_PDB_FILE:openxr_loader> DESTINATION ${CMAKE_INSTALL_BINDIR} OPTIONAL)
 endif()
 

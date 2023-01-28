@@ -69,6 +69,19 @@ struct ApiDumpRecordInfo {
 static ApiDumpRecordInfo g_record_info = {};
 static std::mutex g_record_mutex = {};
 
+// For routing platform_utils.hpp messages.
+void LogPlatformUtilsError(const std::string &message) {
+#if !defined(NDEBUG)
+    std::cerr << message << std::endl;
+#if defined(XR_OS_WINDOWS)
+    OutputDebugStringA((message + "\n").c_str());
+#endif
+#else
+    // Unused
+    (void)message;
+#endif
+}
+
 // HTML utilities
 bool ApiDumpLayerWriteHtmlHeader() {
     try {
@@ -592,7 +605,6 @@ XrResult LAYER_EXPORT XRAPI_CALL xrNegotiateLoaderApiLayerInterface(const XrNego
         apiLayerRequest->structSize != sizeof(XrNegotiateApiLayerRequest) ||
         loaderInfo->minInterfaceVersion > XR_CURRENT_LOADER_API_LAYER_VERSION ||
         loaderInfo->maxInterfaceVersion < XR_CURRENT_LOADER_API_LAYER_VERSION ||
-        loaderInfo->maxInterfaceVersion > XR_CURRENT_LOADER_API_LAYER_VERSION ||
         loaderInfo->maxApiVersion < XR_CURRENT_API_VERSION || loaderInfo->minApiVersion > XR_CURRENT_API_VERSION) {
         return XR_ERROR_INITIALIZATION_FAILED;
     }
