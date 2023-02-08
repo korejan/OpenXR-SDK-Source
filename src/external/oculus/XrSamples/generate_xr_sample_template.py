@@ -7,6 +7,7 @@
 import errno
 import os
 import shutil
+import sys
 
 def remove(path):
     """ param <path> could either be relative or absolute. """
@@ -40,17 +41,18 @@ def CopyDist(src, dst):
 def BuildXrSample(appName, isPublicApp = True, readyForPublicRelease = True):
     folderName = "Xr" + appName
     appLocation = "XrSamples"
+    packageLocation = "sdk"
     
     targetRootPath = f"//arvr/projects/xrruntime/mobile/{appLocation}/{folderName}"
     appClass = folderName + "App"
     appTitle = folderName + " Sample"
-    packageName = "com.oculus.xrsamples." + folderName.lower()
-    targetName = "xrsamples_" + folderName.lower()
+    packageName = f"com.oculus.{packageLocation}.{folderName.lower()}"
+    targetName = f"{appLocation.lower()}_{folderName.lower()}"
 
     # use full path here to deal with command like `XrSamples/generate_xr_sample_template.py`
     dirname = os.path.split(os.path.dirname(os.path.realpath(__file__)))[0] + f"/{appLocation}"
     src = os.path.join(dirname, "XrAppBase")
-    dst = os.path.join(dirname, "{}".format(folderName))
+    dst = os.path.join(dirname, folderName)
     CopyDist(src, dst)
 
     excludeDir = ["assets"]
@@ -69,16 +71,16 @@ def BuildXrSample(appName, isPublicApp = True, readyForPublicRelease = True):
 
             # Replace
             fileData = fileData.replace(
-                "//arvr/projects/xrruntime/mobile/XrSamples/XrAppBase", targetRootPath
+                f"//arvr/projects/xrruntime/mobile/{appLocation}/XrAppBase", targetRootPath
             )
             fileData = fileData.replace(
-                "XrSamples:XrAppBase", "XrSamples:" + folderName
+                f"{appLocation}:XrAppBase", f"{appLocation}:" + folderName
             )
             fileData = fileData.replace("XrAppBaseApp", appClass)
             fileData = fileData.replace("XrAppBase", folderName)
 
             fileData = fileData.replace("com.oculus.sdk.xrappbase", packageName)
-            fileData = fileData.replace("xrsamples_xrappbase", targetName)
+            fileData = fileData.replace(f"{appLocation.lower()}_xrappbase", targetName)
             fileData = fileData.replace("xrappbase", folderName.lower())
 
             fileData = fileData.replace("Xr App Base", appTitle)
@@ -97,7 +99,7 @@ What is your app's name?
     Expectation:
         App Folder: Xr[NameOfYourApp]
         Target: xrsamples_xr[nameofyourapp]
-        Package: com.oculus.xrsamples.xr[nameofyourapp]
+        Package: com.oculus.sdk.xr[nameofyourapp]
         App Class Name: Xr[NameOfYourApp]App\n
 """
     )

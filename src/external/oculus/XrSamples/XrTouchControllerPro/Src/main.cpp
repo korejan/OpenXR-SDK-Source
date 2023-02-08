@@ -177,6 +177,33 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
         ThumbProxAction = CreateAction(
             BaseActionSet, XR_ACTION_TYPE_BOOLEAN_INPUT, "thumb_prox", nullptr, 2, handSubactionPaths);
 
+        // Trigger Value
+        TriggerValueAction = CreateAction(
+            BaseActionSet,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "trigger_value",
+            nullptr,
+            2,
+            handSubactionPaths);
+
+        // Trigger Touch
+        TriggerTouchAction = CreateAction(
+            BaseActionSet,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "trigger_touch",
+            nullptr,
+            2,
+            handSubactionPaths);
+
+        // Squeeze Value
+        SqueezeValueAction = CreateAction(
+            BaseActionSet,
+            XR_ACTION_TYPE_BOOLEAN_INPUT,
+            "squeeze_value",
+            nullptr,
+            2,
+            handSubactionPaths);
+
         XrPath touchInteractionProfile = XR_NULL_PATH;
         OXR(xrStringToPath(
             instance, "/interaction_profiles/oculus/touch_controller", &touchInteractionProfile));
@@ -213,6 +240,24 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
             ActionSuggestedBinding(ThumbProxAction, "/user/hand/left/input/thumb_fb/proximity_fb"));
         baseTouchBindings.emplace_back(ActionSuggestedBinding(
             ThumbProxAction, "/user/hand/right/input/thumb_fb/proximity_fb"));
+
+        // Trigger Value
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            TriggerValueAction, "/user/hand/left/input/trigger/value"));
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            TriggerValueAction, "/user/hand/right/input/trigger/value"));
+
+        // Trigger Touch
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            TriggerTouchAction, "/user/hand/left/input/trigger/touch"));
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            TriggerTouchAction, "/user/hand/right/input/trigger/touch"));
+
+        // Squeeze Value
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            SqueezeValueAction, "/user/hand/left/input/squeeze/value"));
+        baseTouchBindings.emplace_back(ActionSuggestedBinding(
+            SqueezeValueAction, "/user/hand/right/input/squeeze/value"));
 
         // Copy(construct) base paths since these interaction profiles are similar
         std::vector<XrActionSuggestedBinding> touchProBindings(baseTouchBindings);
@@ -262,7 +307,7 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
 
         /// Build UI
         bigText_ = ui_.AddLabel(
-            "OpenXR Touch Controller Pro Sample", {0.1f, -0.1f, -2.0f}, {1300.0f, 100.0f});
+            "OpenXR Touch Controller Pro Sample", {0.1f, -0.7f, -2.0f}, {1300.0f, 100.0f});
 
         OVR::Vector2f size = {200.0f, 100.0f};
         OVR::Vector3f position = {+0.0f, 0.5f, -1.9f};
@@ -307,6 +352,27 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
         ui_.AddLabel("Thumb Prox", position, size);
         thumbProxLText_ = ui_.AddLabel("thProx L 0.0", positionL, size);
         thumbProxRText_ = ui_.AddLabel("thProx R 0.0", positionR, size);
+
+        positionL.y += dh;
+        positionR.y += dh;
+        position.y += dh;
+        ui_.AddLabel("Trigger Value", position, size);
+        triggerValueLText_ = ui_.AddLabel("trVal L 0.0", positionL, size);
+        triggerValueRText_ = ui_.AddLabel("trVal R 0.0", positionR, size);
+
+        positionL.y += dh;
+        positionR.y += dh;
+        position.y += dh;
+        ui_.AddLabel("Trigger Touch", position, size);
+        triggerTouchLText_ = ui_.AddLabel("trTouch L 0.0", positionL, size);
+        triggerTouchRText_ = ui_.AddLabel("trTouch R 0.0", positionR, size);
+
+        positionL.y += dh;
+        positionR.y += dh;
+        position.y += dh;
+        ui_.AddLabel("Squeeze Value", position, size);
+        squeezeValueLText_ = ui_.AddLabel("sqVal L 0.0", positionL, size);
+        squeezeValueRText_ = ui_.AddLabel("sqVal R 0.0", positionR, size);
 
         ui_.AddButton("Haptic Main S", {-0.8f, 0.5f, -1.9f}, size, [=]() {
             VibrateController(MainHapticAction, LeftHandPath, XR_MIN_HAPTIC_DURATION, 157.0f, 1.0f);
@@ -472,13 +538,8 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
                 MainHapticAction, RightHandPath, sineWave.data(), sineWave.size(), sampleRate);
         });
 
-        position.x += 0.4f;
-        ui_.AddButton("Cancel Right Main Haptics", position, size, [=]() {
-            StopHapticEffect(MainHapticAction, RightHandPath);
-        });
-
         // Left Controller
-        position.x -= 2.8f;
+        position.x -= 2.4f;
         sampleRate = 2000.0f;
 
         ui_.AddButton("Decaying sine wave 1s", position, size, [=]() {
@@ -524,11 +585,6 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
                 MainHapticAction, LeftHandPath, sineWave.data(), sineWave.size(), sampleRate);
         });
 
-        position.x -= 0.4f;
-        ui_.AddButton("Cancel Left Main Haptics", position, size, [=]() {
-            StopHapticEffect(MainHapticAction, LeftHandPath);
-        });
-
         // Playing haptics on both controllers by passing XR_NULL_PATH in subActionPath
         position = {+0.0f, +0.1f, -1.9f};
         ui_.AddButton("Haptic Main (both)", position, size, [=]() {
@@ -558,6 +614,51 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
         position.x += 0.4f;
         ui_.AddButton("Trigger (2s, right)", position, size, [=]() {
             VibrateController(TriggerHapticAction, RightHandPath, 2.0f, 157.0f, 0.25f);
+        });
+
+        position = {+0.0f, -0.1f, -1.9f};
+        ui_.AddButton("Stop BOTH Main", position, size, [=]() {
+            StopHapticEffect(MainHapticAction, XR_NULL_PATH);
+        });
+
+        position.x -= 0.4f;
+        ui_.AddButton("Stop Left Main", position, size, [=]() {
+            StopHapticEffect(MainHapticAction, LeftHandPath);
+        });
+
+        position.x += 2*0.4f;
+        ui_.AddButton("Stop Right Main", position, size, [=]() {
+            StopHapticEffect(MainHapticAction, RightHandPath);
+        });
+
+        position = {+0.0f, -0.3f, -1.9f};
+        ui_.AddButton("Stop BOTH Thumb", position, size, [=]() {
+            StopHapticEffect(ThumbHapticAction, XR_NULL_PATH);
+        });
+
+        position.x -= 0.4f;
+        ui_.AddButton("Stop Left Thumb", position, size, [=]() {
+            StopHapticEffect(ThumbHapticAction, LeftHandPath);
+        });
+
+        position.x += 2 * 0.4f;
+        ui_.AddButton("Stop Right Thumb", position, size, [=]() {
+            StopHapticEffect(ThumbHapticAction, RightHandPath);
+        });
+
+        position = {+0.0f, -0.5f, -1.9f};
+        ui_.AddButton("Stop BOTH Trigger", position, size, [=]() {
+            StopHapticEffect(TriggerHapticAction, XR_NULL_PATH);
+        });
+
+        position.x -= 0.4f;
+        ui_.AddButton("Stop Left Trigger", position, size, [=]() {
+            StopHapticEffect(TriggerHapticAction, LeftHandPath);
+        });
+
+        position.x += 2*0.4f;
+        ui_.AddButton("Stop Right Trigger", position, size, [=]() {
+            StopHapticEffect(TriggerHapticAction, RightHandPath);
         });
 
         return true;
@@ -620,6 +721,15 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
             triggerProxR_ = GetActionStateBoolean(TriggerProxAction, RightHandPath).currentState;
             thumbProxL_ = GetActionStateBoolean(ThumbProxAction, LeftHandPath).currentState;
             thumbProxR_ = GetActionStateBoolean(ThumbProxAction, RightHandPath).currentState;
+            /// Trigger Value
+            triggerValueL_ = GetActionStateBoolean(TriggerValueAction, LeftHandPath).currentState;
+            triggerValueR_ = GetActionStateBoolean(TriggerValueAction, RightHandPath).currentState;
+            /// Trigger Touch
+            triggerTouchL_ = GetActionStateBoolean(TriggerTouchAction, LeftHandPath).currentState;
+            triggerTouchR_ = GetActionStateBoolean(TriggerTouchAction, RightHandPath).currentState;
+            /// Squeeze Value
+            squeezeValueL_ = GetActionStateBoolean(SqueezeValueAction, LeftHandPath).currentState;
+            squeezeValueR_ = GetActionStateBoolean(SqueezeValueAction, RightHandPath).currentState;
         }
 
         XrHapticActionInfo hai = {XR_TYPE_HAPTIC_ACTION_INFO, nullptr};
@@ -631,8 +741,9 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
         hai.subactionPath = RightHandPath;
         OXR(xrGetDeviceSampleRateFB(Session, &hai, &rightDeviceSampleRate_));
 
-        bool aPressed = GetActionStateBoolean(ButtonAAction).currentState;
-        if (aPressed) {
+        // once per A button press
+        const auto buttonA = GetActionStateBoolean(ButtonAAction);
+        if (buttonA.currentState == XR_TRUE && buttonA.changedSinceLastSync == XR_TRUE) {
             // Trigger PCM haptics: simple sine wave
             std::vector<float> sineWave =
                 createPCMSamples(157, std::size(constantIntensity), constantIntensity, ToXrTime(1));
@@ -640,8 +751,9 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
                 MainHapticAction, RightHandPath, sineWave.data(), sineWave.size(), 2000.0f);
         }
 
-        bool bPressed = GetActionStateBoolean(ButtonBAction).currentState;
-        if (bPressed) {
+        // once per B button press
+        const auto buttonB = GetActionStateBoolean(ButtonBAction);
+        if (buttonB.currentState == XR_TRUE && buttonB.changedSinceLastSync == XR_TRUE) {
             // Trigger AE haptics
             float aeBufferSimple[500]; // 1sec
             for (int i = 0; i < 500; i++) {
@@ -656,14 +768,16 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
                 0.002f * std::size(aeBufferSimple));
         }
 
-        bool xPressed = GetActionStateBoolean(ButtonXAction).currentState;
-        if (xPressed) {
+        // once per X button press
+        const auto buttonX = GetActionStateBoolean(ButtonXAction);
+        if (buttonX.currentState == XR_TRUE && buttonX.changedSinceLastSync == XR_TRUE) {
             // Trigger Localized(thumb) haptics
             VibrateController(ThumbHapticAction, LeftHandPath, 0.1f, 157.0f, 1.0f);
         }
 
-        bool yPressed = GetActionStateBoolean(ButtonYAction).currentState;
-        if (yPressed) {
+        // once per Y button press
+        const auto buttonY = GetActionStateBoolean(ButtonYAction);
+        if (buttonY.currentState == XR_TRUE && buttonY.changedSinceLastSync == XR_TRUE) {
             // Trigger Localized(trigger) haptics
             VibrateController(TriggerHapticAction, LeftHandPath, 0.1f, 157.0f, 1.0f);
         }
@@ -762,6 +876,42 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
             ss << thumbProxR_;
             thumbProxRText_->SetText(ss.str().c_str());
         }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << triggerValueL_;
+            triggerValueLText_->SetText(ss.str().c_str());
+        }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << triggerValueR_;
+            triggerValueRText_->SetText(ss.str().c_str());
+        }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << triggerTouchL_;
+            triggerTouchLText_->SetText(ss.str().c_str());
+        }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << triggerTouchR_;
+            triggerTouchRText_->SetText(ss.str().c_str());
+        }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << squeezeValueL_;
+            squeezeValueLText_->SetText(ss.str().c_str());
+        }
+        {
+            std::stringstream ss;
+            ss << std::setprecision(4) << std::fixed;
+            ss << squeezeValueR_;
+            squeezeValueRText_->SetText(ss.str().c_str());
+        }
 
         /*
          */
@@ -807,6 +957,9 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
             GripTriggerAction,
             TriggerProxAction,
             ThumbProxAction,
+            TriggerValueAction,
+            TriggerTouchAction,
+            SqueezeValueAction,
         };
         for (size_t i = 0; i < sizeof(actionsToEnumerate) / sizeof(actionsToEnumerate[0]); ++i) {
             XrBoundSourcesForActionEnumerateInfo enumerateInfo = {};
@@ -1004,6 +1157,27 @@ Function to create PCM samples from an array of amplitudes, frequency and durati
     bool thumbProxR_ = false;
     OVRFW::VRMenuObject* thumbProxLText_ = nullptr;
     OVRFW::VRMenuObject* thumbProxRText_ = nullptr;
+
+    // Trigger Value
+    XrAction TriggerValueAction = XR_NULL_HANDLE;
+    bool triggerValueL_ = false;
+    bool triggerValueR_ = false;
+    OVRFW::VRMenuObject* triggerValueLText_ = nullptr;
+    OVRFW::VRMenuObject* triggerValueRText_ = nullptr;
+
+    // Trigger Touch
+    XrAction TriggerTouchAction = XR_NULL_HANDLE;
+    bool triggerTouchL_ = false;
+    bool triggerTouchR_ = false;
+    OVRFW::VRMenuObject* triggerTouchLText_ = nullptr;
+    OVRFW::VRMenuObject* triggerTouchRText_ = nullptr;
+
+    // Squeeze Value
+    XrAction SqueezeValueAction = XR_NULL_HANDLE;
+    bool squeezeValueL_ = false;
+    bool squeezeValueR_ = false;
+    OVRFW::VRMenuObject* squeezeValueLText_ = nullptr;
+    OVRFW::VRMenuObject* squeezeValueRText_ = nullptr;
 
     /// UI lag
     bool delayUI_ = false;

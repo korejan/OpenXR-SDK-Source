@@ -968,8 +968,7 @@ bool XrApp::InitSession() {
                 "Viewport configuration type %d : %s",
                 viewportConfigType,
                 viewportConfigType == supportedViewConfigType ? "Selected" : "");
-            XrViewConfigurationProperties viewportConfig;
-            viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+            XrViewConfigurationProperties viewportConfig{XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
             OXR(xrGetViewConfigurationProperties(
                 Instance, SystemId, viewportConfigType, &viewportConfig));
             ALOGV(
@@ -1026,7 +1025,6 @@ bool XrApp::InitSession() {
     }
 
     // Get the viewport configuration info for the chosen viewport configuration type.
-    ViewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
     OXR(xrGetViewConfigurationProperties(
         Instance, SystemId, supportedViewConfigType, &ViewportConfig));
 

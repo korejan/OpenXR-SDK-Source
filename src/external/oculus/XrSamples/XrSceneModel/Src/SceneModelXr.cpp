@@ -677,7 +677,15 @@ void ovrApp::CollectSpaceContainerUuids(XrSpace space, std::unordered_set<std::s
 }
 
 std::string GetSemanticLabels(ovrApp& app, const XrSpace space) {
-    XrSemanticLabelsFB labels = {XR_TYPE_SEMANTIC_LABELS_FB, nullptr, 0};
+    static const std::string recognizedLabels =
+        "DESK,COUCH,FLOOR,CEILING,WALL_FACE,WINDOW_FRAME,DOOR_FRAME,OTHER";
+    const XrSemanticLabelsSupportInfoFB semanticLabelsSupportInfo = {
+        XR_TYPE_SEMANTIC_LABELS_SUPPORT_INFO_FB,
+        nullptr,
+        XR_SCENE_SUPPORT_MULTIPLE_SEMANTIC_LABELS_FB,
+        recognizedLabels.c_str()};
+
+    XrSemanticLabelsFB labels = {XR_TYPE_SEMANTIC_LABELS_FB, &semanticLabelsSupportInfo, 0};
 
     if (!app.IsComponentEnabled(space, XR_SPACE_COMPONENT_TYPE_SEMANTIC_LABELS_FB)) {
         return std::string();
@@ -1428,8 +1436,7 @@ void android_main(struct android_app* androidApp) {
             viewportConfigType,
             viewportConfigType == supportedViewConfigType ? "Selected" : "");
 
-        XrViewConfigurationProperties viewportConfig;
-        viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+        XrViewConfigurationProperties viewportConfig = {XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
         OXR(xrGetViewConfigurationProperties(
             instance, app.SystemId, viewportConfigType, &viewportConfig));
         ALOGV(

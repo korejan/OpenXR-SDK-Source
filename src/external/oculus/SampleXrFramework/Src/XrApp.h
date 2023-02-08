@@ -542,7 +542,7 @@ class XrApp {
 
     XrInstance Instance = XR_NULL_HANDLE;
     XrSession Session = XR_NULL_HANDLE;
-    XrViewConfigurationProperties ViewportConfig;
+    XrViewConfigurationProperties ViewportConfig{XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
     XrViewConfigurationView ViewConfigurationView[MAX_NUM_EYES];
     XrView Projections[MAX_NUM_EYES];
     XrSystemId SystemId = XR_NULL_SYSTEM_ID;

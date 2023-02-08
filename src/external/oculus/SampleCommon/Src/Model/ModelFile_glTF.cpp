@@ -410,6 +410,189 @@ bool ReadSurfaceDataFromAccessor(
     return loaded;
 }
 
+bool ReadVertexAttributes(
+    const OVR::JsonReader& attributes,
+    ModelFile& modelFile,
+    VertexAttribs& attribs,
+    bool isMorphTarget) {
+    bool loaded = true;
+
+    { // POSITION and BOUNDS
+        const int positionIndex = attributes.GetChildInt32ByName("POSITION", -1);
+        // must have positions unless this is a morph target
+        if (!isMorphTarget) {
+            if (positionIndex < 0 ||
+                positionIndex >= static_cast<int>(modelFile.Accessors.size())) {
+                ALOGW(
+                    "Error: Invalid position accessor index %i, accessor count = %zu",
+                    positionIndex,
+                    modelFile.Accessors.size());
+                loaded = false;
+                return loaded;
+            }
+        }
+
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.position, modelFile, positionIndex, ACCESSOR_VEC3, GL_FLOAT, -1, false);
+    }
+
+    // attribute count must match positions unless this is a morph target
+    const int numVertices = isMorphTarget ? -1 : static_cast<int>(attribs.position.size());
+
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.normal,
+            modelFile,
+            attributes.GetChildInt32ByName("NORMAL", -1),
+            ACCESSOR_VEC3,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    // #TODO:  we have tangent as a vec3, the spec has it as a vec4.
+    // so we will have to one off the loading of it.
+    // if (loaded) {
+    //     // loaded = ReadSurfaceDataFromAccessor(
+    //     //     attribs.tangent,
+    //     //     modelFile,
+    //     //     attributes.GetChildInt32ByName("TANGENT", -1),
+    //     //     ACCESSOR_VEC4,
+    //     //     GL_FLOAT,
+    //     //     numVertices,
+    //     //     false);
+    // }
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.binormal,
+            modelFile,
+            attributes.GetChildInt32ByName("BINORMAL", -1),
+            ACCESSOR_VEC3,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.color,
+            modelFile,
+            attributes.GetChildInt32ByName("COLOR", -1),
+            ACCESSOR_VEC4,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.uv0,
+            modelFile,
+            attributes.GetChildInt32ByName("TEXCOORD_0", -1),
+            ACCESSOR_VEC2,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.uv1,
+            modelFile,
+            attributes.GetChildInt32ByName("TEXCOORD_1", -1),
+            ACCESSOR_VEC2,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    // #TODO:  TEXCOORD_2 is in the gltf spec, but we only support 2
+    // uv sets. support more uv coordinates, skipping for now.
+    // if ( loaded ) { loaded = ReadSurfaceDataFromAccessor(
+    // attribs.uv2, modelFile,
+    // attributes.GetChildInt32ByName( "TEXCOORD_2", -1 ),
+    // ACCESSOR_VEC2, GL_FLOAT, static_cast< int
+    // >( newPrimitive.attribs.position.size() ) ); }
+    // #TODO: get weights of type unsigned_byte and unsigned_short
+    // working.
+    if (loaded) {
+        loaded = ReadSurfaceDataFromAccessor(
+            attribs.jointWeights,
+            modelFile,
+            attributes.GetChildInt32ByName("WEIGHTS_0", -1),
+            ACCESSOR_VEC4,
+            GL_FLOAT,
+            numVertices,
+            false);
+    }
+    // WEIGHT_0 can be either GL_UNSIGNED_SHORT or GL_BYTE
+    if (loaded) {
+        int jointIndex = attributes.GetChildInt32ByName("JOINTS_0", -1);
+        if (jointIndex >= 0 && jointIndex < static_cast<int>(modelFile.Accessors.size())) {
+            ModelAccessor& acc = modelFile.Accessors[jointIndex];
+            if (acc.componentType == GL_UNSIGNED_SHORT) {
+                attribs.jointIndices.resize(acc.count);
+                for (int accIndex = 0; accIndex < acc.count; accIndex++) {
+                    attribs.jointIndices[accIndex].x =
+                        (int)((unsigned short*)(acc.BufferData()))[accIndex * 4 + 0];
+                    attribs.jointIndices[accIndex].y =
+                        (int)((unsigned short*)(acc.BufferData()))[accIndex * 4 + 1];
+                    attribs.jointIndices[accIndex].z =
+                        (int)((unsigned short*)(acc.BufferData()))[accIndex * 4 + 2];
+                    attribs.jointIndices[accIndex].w =
+                        (int)((unsigned short*)(acc.BufferData()))[accIndex * 4 + 3];
+                }
+            } else if (acc.componentType == GL_BYTE || acc.componentType == GL_UNSIGNED_BYTE) {
+                attribs.jointIndices.resize(acc.count);
+                for (int accIndex = 0; accIndex < acc.count; accIndex++) {
+                    attribs.jointIndices[accIndex].x =
+                        (int)((uint8_t*)(acc.BufferData()))[accIndex * 4 + 0];
+                    attribs.jointIndices[accIndex].y =
+                        (int)((uint8_t*)(acc.BufferData()))[accIndex * 4 + 1];
+                    attribs.jointIndices[accIndex].z =
+                        (int)((uint8_t*)(acc.BufferData()))[accIndex * 4 + 2];
+                    attribs.jointIndices[accIndex].w =
+                        (int)((uint8_t*)(acc.BufferData()))[accIndex * 4 + 3];
+                }
+            } else if (acc.componentType == GL_FLOAT) { // not officially in spec, but it's what
+                                                        // our exporter spits out.
+                attribs.jointIndices.resize(acc.count);
+                for (int accIndex = 0; accIndex < acc.count; accIndex++) {
+                    attribs.jointIndices[accIndex].x =
+                        (int)((float*)(acc.BufferData()))[accIndex * 4 + 0];
+                    attribs.jointIndices[accIndex].y =
+                        (int)((float*)(acc.BufferData()))[accIndex * 4 + 1];
+                    attribs.jointIndices[accIndex].z =
+                        (int)((float*)(acc.BufferData()))[accIndex * 4 + 2];
+                    attribs.jointIndices[accIndex].w =
+                        (int)((float*)(acc.BufferData()))[accIndex * 4 + 3];
+                }
+            } else {
+                ALOGW(
+                    "invalid component type %d on joints_0 accessor on model %s",
+                    acc.componentType,
+                    modelFile.FileName.c_str());
+                loaded = false;
+            }
+
+            /// List unique joints
+            std::unordered_map<int, size_t> uniqueJoints;
+            for (const auto& index : attribs.jointIndices) {
+                for (int i = 0; i < 4; ++i) {
+                    int jointID = index[i];
+                    auto it = uniqueJoints.find(jointID);
+                    if (it == uniqueJoints.end()) {
+                        uniqueJoints[jointID] = 1u;
+                    } else {
+                        uniqueJoints[jointID] = uniqueJoints[jointID] + 1;
+                    }
+                }
+            }
+            /// print them
+            ALOGW("Enumerating skinning joints:");
+            for (const auto& u : uniqueJoints) {
+                ALOGW(" - joint: %02d count: %llu", u.first, u.second);
+            }
+        }
+    }
+    return loaded;
+}
+
 // Requires the buffers and images to already be loaded in the model
 bool LoadModelFile_glTF_Json(
     ModelFile& modelFile,
@@ -815,16 +998,8 @@ bool LoadModelFile_glTF_Json(
                             Model newGltfModel;
 
                             newGltfModel.name = mesh.GetChildStringByName("name");
-                            // #TODO: implement morph weights
-                            const OVR::JsonReader weights(mesh.GetChildByName("weights"));
-                            if (weights.IsArray()) {
-                                while (!weights.IsEndOfArray()) {
-                                    auto weight = weights.GetNextArrayElement();
-                                    newGltfModel.weights.push_back(weight->GetFloatValue());
-                                }
-                            }
 
-                            { // SURFACES (gltf primative)
+                            { // SURFACES (gltf primitive)
                                 const OVR::JsonReader primitives(mesh.GetChildByName("primitives"));
                                 if (!primitives.IsArray()) {
                                     ALOGW("Error: no primitives on gltfMesh");
@@ -868,8 +1043,6 @@ bool LoadModelFile_glTF_Json(
                                         loaded = false;
                                     }
 
-                                    // #TODO: implement morph targets
-
                                     const OVR::JsonReader attributes(
                                         primitive.GetChildByName("attributes"));
                                     if (!attributes.IsObject()) {
@@ -885,226 +1058,44 @@ bool LoadModelFile_glTF_Json(
 
                                     // VERTICES
                                     VertexAttribs attribs;
+                                    loaded = ReadVertexAttributes(
+                                        attributes, modelFile, attribs, false /*isMorphTarget*/);
 
-                                    { // POSITION and BOUNDS
-                                        const int positionIndex =
-                                            attributes.GetChildInt32ByName("POSITION", -1);
-                                        if (positionIndex < 0) {
-                                            ALOGW("Error: Invalid position index on gltfPrimitive");
+                                    // MORPH TARGETS
+                                    const OVR::JsonReader targets(
+                                        primitive.GetChildByName("targets"));
+                                    if (targets.IsValid()) {
+                                        if (!targets.IsArray()) {
+                                            ALOGW("Error: Invalid targets on primitive");
                                             loaded = false;
                                         }
 
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.position,
-                                            modelFile,
-                                            positionIndex,
-                                            ACCESSOR_VEC3,
-                                            GL_FLOAT,
-                                            -1,
-                                            false);
-
-                                        const ModelAccessor* positionAccessor =
-                                            &modelFile.Accessors[positionIndex];
-                                        if (positionAccessor == nullptr) {
-                                            ALOGW(
-                                                "Error: Invalid positionAccessor on surface %s",
-                                                newGltfSurface.surfaceDef.surfaceName.c_str());
-                                            loaded = false;
-                                        } else if (!positionAccessor->minMaxSet) {
-                                            ALOGW(
-                                                "Error: no min and max set on positionAccessor on surface %s",
-                                                newGltfSurface.surfaceDef.surfaceName.c_str());
-                                            loaded = false;
-                                        } else {
-                                            Vector3f min;
-                                            min.x = positionAccessor->floatMin[0];
-                                            min.y = positionAccessor->floatMin[1];
-                                            min.z = positionAccessor->floatMin[2];
-                                            newGltfSurface.surfaceDef.geo.localBounds.AddPoint(min);
-
-                                            Vector3f max;
-                                            max.x = positionAccessor->floatMax[0];
-                                            max.y = positionAccessor->floatMax[1];
-                                            max.z = positionAccessor->floatMax[2];
-                                            newGltfSurface.surfaceDef.geo.localBounds.AddPoint(max);
-                                        }
-                                    }
-
-                                    const int numVertices =
-                                        static_cast<int>(attribs.position.size());
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.normal,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("NORMAL", -1),
-                                            ACCESSOR_VEC3,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    // #TODO:  we have tangent as a vec3, the spec has it as a vec4.
-                                    // so we will have to one off the loading of it.
-                                    // if (loaded) {
-                                    //     // loaded = ReadSurfaceDataFromAccessor(
-                                    //     //     attribs.tangent,
-                                    //     //     modelFile,
-                                    //     //     attributes.GetChildInt32ByName("TANGENT", -1),
-                                    //     //     ACCESSOR_VEC4,
-                                    //     //     GL_FLOAT,
-                                    //     //     numVertices,
-                                    //     //     false);
-                                    // }
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.binormal,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("BINORMAL", -1),
-                                            ACCESSOR_VEC3,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.color,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("COLOR", -1),
-                                            ACCESSOR_VEC4,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.uv0,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("TEXCOORD_0", -1),
-                                            ACCESSOR_VEC2,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.uv1,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("TEXCOORD_1", -1),
-                                            ACCESSOR_VEC2,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    // #TODO:  TEXCOORD_2 is in the gltf spec, but we only support 2
-                                    // uv sets. support more uv coordinates, skipping for now.
-                                    // if ( loaded ) { loaded = ReadSurfaceDataFromAccessor(
-                                    // attribs.uv2, modelFile, attributes.GetChildInt32ByName(
-                                    // "TEXCOORD_2", -1 ), ACCESSOR_VEC2, GL_FLOAT, static_cast< int
-                                    // >( attribs.position.size() ) ); }
-                                    // #TODO: get weights of type unsigned_byte and unsigned_short
-                                    // working.
-                                    if (loaded) {
-                                        loaded = ReadSurfaceDataFromAccessor(
-                                            attribs.jointWeights,
-                                            modelFile,
-                                            attributes.GetChildInt32ByName("WEIGHTS_0", -1),
-                                            ACCESSOR_VEC4,
-                                            GL_FLOAT,
-                                            numVertices,
-                                            false);
-                                    }
-                                    // WEIGHT_0 can be either GL_UNSIGNED_SHORT or GL_BYTE
-                                    if (loaded) {
-                                        int jointIndex =
-                                            attributes.GetChildInt32ByName("JOINTS_0", -1);
-                                        if (jointIndex >= 0 &&
-                                            jointIndex <
-                                                static_cast<int>(modelFile.Accessors.size())) {
-                                            ModelAccessor& acc = modelFile.Accessors[jointIndex];
-                                            if (acc.componentType == GL_UNSIGNED_SHORT) {
-                                                attribs.jointIndices.resize(acc.count);
-                                                for (int accIndex = 0; accIndex < acc.count;
-                                                     accIndex++) {
-                                                    attribs.jointIndices[accIndex].x =
-                                                        (int)((unsigned short*)(acc.BufferData()))
-                                                            [accIndex * 4 + 0];
-                                                    attribs.jointIndices[accIndex].y =
-                                                        (int)((unsigned short*)(acc.BufferData()))
-                                                            [accIndex * 4 + 1];
-                                                    attribs.jointIndices[accIndex].z =
-                                                        (int)((unsigned short*)(acc.BufferData()))
-                                                            [accIndex * 4 + 2];
-                                                    attribs.jointIndices[accIndex].w =
-                                                        (int)((unsigned short*)(acc.BufferData()))
-                                                            [accIndex * 4 + 3];
-                                                }
-                                            } else if (
-                                                acc.componentType == GL_BYTE ||
-                                                acc.componentType == GL_UNSIGNED_BYTE) {
-                                                attribs.jointIndices.resize(acc.count);
-                                                for (int accIndex = 0; accIndex < acc.count;
-                                                     accIndex++) {
-                                                    attribs.jointIndices[accIndex].x =
-                                                        (int)((uint8_t*)(acc.BufferData()))
-                                                            [accIndex * 4 + 0];
-                                                    attribs.jointIndices[accIndex].y =
-                                                        (int)((uint8_t*)(acc.BufferData()))
-                                                            [accIndex * 4 + 1];
-                                                    attribs.jointIndices[accIndex].z =
-                                                        (int)((uint8_t*)(acc.BufferData()))
-                                                            [accIndex * 4 + 2];
-                                                    attribs.jointIndices[accIndex].w =
-                                                        (int)((uint8_t*)(acc.BufferData()))
-                                                            [accIndex * 4 + 3];
-                                                }
-                                            } else if (
-                                                acc.componentType ==
-                                                GL_FLOAT) { // not officially in spec, but it's what
-                                                            // our exporter spits out.
-                                                attribs.jointIndices.resize(acc.count);
-                                                for (int accIndex = 0; accIndex < acc.count;
-                                                     accIndex++) {
-                                                    attribs.jointIndices[accIndex].x =
-                                                        (int)((float*)(acc.BufferData()))
-                                                            [accIndex * 4 + 0];
-                                                    attribs.jointIndices[accIndex].y =
-                                                        (int)((float*)(acc.BufferData()))
-                                                            [accIndex * 4 + 1];
-                                                    attribs.jointIndices[accIndex].z =
-                                                        (int)((float*)(acc.BufferData()))
-                                                            [accIndex * 4 + 2];
-                                                    attribs.jointIndices[accIndex].w =
-                                                        (int)((float*)(acc.BufferData()))
-                                                            [accIndex * 4 + 3];
-                                                }
-                                            } else {
-                                                ALOGW(
-                                                    "invalid component type %d on joints_0 accessor on model %s",
-                                                    acc.componentType,
-                                                    modelFile.FileName.c_str());
-                                                loaded = false;
-                                            }
-
-                                            /// List unique joints
-                                            std::unordered_map<int, size_t> uniqueJoints;
-                                            for (const auto& index : attribs.jointIndices) {
-                                                for (int i = 0; i < 4; ++i) {
-                                                    int jointID = index[i];
-                                                    auto it = uniqueJoints.find(jointID);
-                                                    if (it == uniqueJoints.end()) {
-                                                        uniqueJoints[jointID] = 1u;
-                                                    } else {
-                                                        uniqueJoints[jointID] =
-                                                            uniqueJoints[jointID] + 1;
-                                                    }
-                                                }
-                                            }
-                                            /// print them
-                                            ALOGW("Enumerating skinning joints:");
-                                            for (const auto& u : uniqueJoints) {
-                                                ALOGW(
-                                                    " - joint: %02d count: %llu",
-                                                    u.first,
-                                                    u.second);
+                                        while (!targets.IsEndOfArray() && loaded) {
+                                            const OVR::JsonReader target(
+                                                targets.GetNextArrayElement());
+                                            VertexAttribs targetAttribs;
+                                            loaded = ReadVertexAttributes(
+                                                target,
+                                                modelFile,
+                                                targetAttribs,
+                                                true /*isMorphTarget*/);
+                                            if (loaded) {
+                                                // for each morph target attribute, an original
+                                                // attribute MUST be present in the mesh primitive
+#define CHECK_ATTRIB_COUNT(ATTRIB)                                                               \
+    if (!targetAttribs.ATTRIB.empty() && targetAttribs.ATTRIB.size() != attribs.ATTRIB.size()) { \
+        ALOGW("Error: target " #ATTRIB " count mismatch on gltfPrimitive");                      \
+        loaded = false;                                                                          \
+    }
+                                                CHECK_ATTRIB_COUNT(position);
+                                                CHECK_ATTRIB_COUNT(normal);
+                                                CHECK_ATTRIB_COUNT(tangent);
+                                                CHECK_ATTRIB_COUNT(color);
+                                                CHECK_ATTRIB_COUNT(uv0);
+                                                CHECK_ATTRIB_COUNT(uv1);
+#undef CHECK_ATTRIB_COUNT
+                                                newGltfSurface.targets.emplace_back(
+                                                    std::move(targetAttribs));
                                             }
                                         }
                                     }
@@ -1281,10 +1272,50 @@ bool LoadModelFile_glTF_Json(
                                         newGltfSurface.surfaceDef.graphicsCommand.GpuState
                                             .cullEnable = false;
                                     }
-                                    newGltfModel.surfaces.push_back(newGltfSurface);
+
+                                    // Retain original vertex data if we use morph targets
+                                    if (!newGltfSurface.targets.empty()) {
+                                        newGltfSurface.attribs = std::move(attribs);
+                                    }
+                                    newGltfModel.surfaces.emplace_back(std::move(newGltfSurface));
                                 }
                             } // END SURFACES
-                            modelFile.Models.push_back(newGltfModel);
+
+                            // all primitives MUST have the same number of morph targets in the same
+                            // order
+                            for (const auto& surface : newGltfModel.surfaces) {
+                                if (newGltfModel.surfaces[0].targets.size() !=
+                                    surface.targets.size()) {
+                                    ALOGW(
+                                        "Error: not all primitives have the same number of morph targets");
+                                    loaded = false;
+                                }
+                            }
+
+                            { // WEIGHTS (optional)
+                                if (loaded) {
+                                    const OVR::JsonReader weights(mesh.GetChildByName("weights"));
+                                    if (weights.IsArray()) {
+                                        while (!weights.IsEndOfArray()) {
+                                            newGltfModel.weights.push_back(
+                                                weights.GetNextArrayFloat(0.0f));
+                                        }
+                                        if (newGltfModel.weights.size() !=
+                                            newGltfModel.surfaces[0].targets.size()) {
+                                            ALOGW(
+                                                "Error: mesh weights and morph target count mismatch");
+                                            loaded = false;
+                                        }
+                                    } else if (!newGltfModel.surfaces.empty()) {
+                                        // when weights is undefined, the default targets' weights
+                                        // are zeros
+                                        newGltfModel.weights.resize(
+                                            newGltfModel.surfaces[0].targets.size(), 0.0f);
+                                    }
+                                }
+                            } // END WEIGHTS
+
+                            modelFile.Models.emplace_back(std::move(newGltfModel));
                         }
                     }
                 }
@@ -1387,8 +1418,6 @@ bool LoadModelFile_glTF_Json(
                         const OVR::JsonReader node(nodes.GetNextArrayElement());
                         if (node.IsObject()) {
                             ModelNode* pGltfNode = &modelFile.Nodes[nodeIndex];
-
-                            // #TODO: implement morph weights
 
                             pGltfNode->name = node.GetChildStringByName("name");
                             const OVR::JsonReader matrixReader = node.GetChildByName("matrix");
@@ -1514,6 +1543,28 @@ bool LoadModelFile_glTF_Json(
                                     loaded = false;
                                 }
                                 pGltfNode->model = &modelFile.Models[meshIndex];
+
+                                // initialize morph target weights
+                                if (!pGltfNode->model->weights.empty()) {
+                                    const OVR::JsonReader weightsReader(
+                                        node.GetChildByName("weights"));
+                                    if (weightsReader.IsArray()) {
+                                        // use node weights if it is defined
+                                        while (!weightsReader.IsEndOfArray() && loaded) {
+                                            pGltfNode->weights.push_back(
+                                                weightsReader.GetNextArrayFloat(0.0f));
+                                        }
+                                        if (pGltfNode->weights.size() !=
+                                            pGltfNode->model->weights.size()) {
+                                            ALOGW("Error: weights count mismatch on gltfNode");
+                                            loaded = false;
+                                        }
+                                    } else {
+                                        // when node.weights is undefined, mesh.weights property
+                                        // MUST be used instead
+                                        pGltfNode->weights = pGltfNode->model->weights;
+                                    }
+                                }
                             }
 
                             Matrix4f localTransform;
@@ -1628,71 +1679,10 @@ bool LoadModelFile_glTF_Json(
                                                 MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE;
                                         } else {
                                             ALOGW(
-                                                "Error: Invalid interpolation type '%s' on sampler on animtion '%s'",
+                                                "Error: Invalid interpolation type '%s' on sampler on animation '%s'",
                                                 interpolation.c_str(),
                                                 modelAnimation.name.c_str());
                                             loaded = false;
-                                        }
-
-                                        if (loaded) {
-                                            if (modelAnimationSampler.interpolation ==
-                                                    MODEL_ANIMATION_INTERPOLATION_LINEAR ||
-                                                modelAnimationSampler.interpolation ==
-                                                    MODEL_ANIMATION_INTERPOLATION_STEP) {
-                                                if (modelAnimationSampler.input->count !=
-                                                    modelAnimationSampler.output->count) {
-                                                    ALOGW(
-                                                        "input and output have different counts on sampler  on animation '%s'",
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                                if (modelAnimationSampler.input->count < 2) {
-                                                    ALOGW(
-                                                        "invalid number of samples on animation sampler input %d '%s'",
-                                                        modelAnimationSampler.input->count,
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                            } else if (
-                                                modelAnimationSampler.interpolation ==
-                                                MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE) {
-                                                if ((modelAnimationSampler.input->count + 2) !=
-                                                    modelAnimationSampler.output->count) {
-                                                    ALOGW(
-                                                        "input and output have invalid counts on sampler on animation '%s'",
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                                if (modelAnimationSampler.input->count < 4) {
-                                                    ALOGW(
-                                                        "invalid number of samples on animation sampler input %d '%s'",
-                                                        modelAnimationSampler.input->count,
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                            } else if (
-                                                modelAnimationSampler.interpolation ==
-                                                MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE) {
-                                                if (modelAnimationSampler.input->count !=
-                                                    (modelAnimationSampler.output->count * 3)) {
-                                                    ALOGW(
-                                                        "input and output have invalid counts on sampler on animation '%s'",
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                                if (modelAnimationSampler.input->count < 2) {
-                                                    ALOGW(
-                                                        "invalid number of samples on animation sampler input %d '%s'",
-                                                        modelAnimationSampler.input->count,
-                                                        modelAnimation.name.c_str());
-                                                    loaded = false;
-                                                }
-                                            } else {
-                                                ALOGW(
-                                                    "unkown animaiton interpolation on '%s'",
-                                                    modelAnimation.name.c_str());
-                                                loaded = false;
-                                            }
                                         }
 
                                         modelAnimation.samplers.push_back(modelAnimationSampler);
@@ -1770,11 +1760,100 @@ bool LoadModelFile_glTF_Json(
                                                     modelAnimation.name.c_str());
                                                 loaded = false;
                                             }
+
+                                            if (loaded) {
+                                                // validation sampler now that we have the path
+                                                auto sampler = modelAnimationChannel.sampler;
+                                                int inputCount = sampler->input->count;
+                                                int outputCount = sampler->output->count;
+                                                if (modelAnimationChannel.path ==
+                                                    MODEL_ANIMATION_PATH_WEIGHTS) {
+                                                    auto node =
+                                                        modelFile
+                                                            .Nodes[modelAnimationChannel.nodeIndex];
+                                                    outputCount /=
+                                                        node.model->surfaces[0].targets.size();
+                                                }
+
+                                                if (sampler->interpolation ==
+                                                        MODEL_ANIMATION_INTERPOLATION_LINEAR ||
+                                                    sampler->interpolation ==
+                                                        MODEL_ANIMATION_INTERPOLATION_STEP) {
+                                                    if (inputCount != outputCount) {
+                                                        ALOGW(
+                                                            "input (%d) and output (%d) have different counts on sampler on animation '%s'",
+                                                            inputCount,
+                                                            outputCount,
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+
+                                                        auto node =
+                                                            modelFile.Nodes[modelAnimationChannel
+                                                                                .nodeIndex];
+                                                    }
+                                                    if (inputCount < 2) {
+                                                        ALOGW(
+                                                            "invalid number of samples on animation sampler input %d '%s'",
+                                                            inputCount,
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+                                                    }
+                                                } else if (
+                                                    sampler->interpolation ==
+                                                    MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE) {
+                                                    if ((inputCount + 2) != outputCount) {
+                                                        ALOGW(
+                                                            "input and output have invalid counts on sampler on animation '%s'",
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+                                                    }
+                                                    if (inputCount < 4) {
+                                                        ALOGW(
+                                                            "invalid number of samples on animation sampler input %d '%s'",
+                                                            inputCount,
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+                                                    }
+                                                } else if (
+                                                    sampler->interpolation ==
+                                                    MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE) {
+                                                    if (inputCount != (outputCount * 3)) {
+                                                        ALOGW(
+                                                            "input and output have invalid counts on sampler on animation '%s'",
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+                                                    }
+                                                    if (inputCount < 2) {
+                                                        ALOGW(
+                                                            "invalid number of samples on animation sampler input %d '%s'",
+                                                            inputCount,
+                                                            modelAnimation.name.c_str());
+                                                        loaded = false;
+                                                    }
+                                                } else {
+                                                    ALOGW(
+                                                        "unkown animaiton interpolation on '%s'",
+                                                        modelAnimation.name.c_str());
+                                                    loaded = false;
+                                                }
+                                            }
                                         } else {
                                             ALOGW(
                                                 "bad target object on '%s'",
                                                 modelAnimation.name.c_str());
                                             loaded = false;
+                                        }
+
+                                        const OVR::JsonReader extras =
+                                            channel.GetChildByName("extras");
+                                        if (extras.IsObject()) {
+                                            // additive index only make sense for weights
+                                            if (modelAnimationChannel.path ==
+                                                MODEL_ANIMATION_PATH_WEIGHTS) {
+                                                modelAnimationChannel.additiveWeightIndex =
+                                                    extras.GetChildInt32ByName(
+                                                        "additiveWeightIndex", -1);
+                                            }
                                         }
 
                                         modelAnimation.channels.push_back(modelAnimationChannel);

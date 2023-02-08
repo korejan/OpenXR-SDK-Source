@@ -21,19 +21,8 @@ extern "C" {
 
 #ifndef XR_FB_haptic_pcm
 #define XR_FB_haptic_pcm 1
-
-#define XR_FBX1_haptic_pcm_SPEC_VERSION 1
-#define XR_FBX1_HAPTIC_PCM_EXTENSION_NAME "XR_FBX1_haptic_pcm"
-
-#ifndef XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
 #define XR_FB_haptic_pcm_SPEC_VERSION 1
 #define XR_FB_HAPTIC_PCM_EXTENSION_NAME "XR_FB_haptic_pcm"
-#elif XR_FB_haptic_pcm_EXPERIMENTAL_VERSION == 1
-#define XR_FB_haptic_pcm_SPEC_VERSION XR_FBX1_haptic_pcm_SPEC_VERSION
-#define XR_FB_HAPTIC_PCM_EXTENSION_NAME XR_FBX1_HAPTIC_PCM_EXTENSION_NAME
-#else
-#error "unknown experimental version for XR_FB_haptic_pcm"
-#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
 
 /// We have fixed the internal buffer size. The developer may check the bufferCountOutout field of
 /// the XrHapticPcmVibrationFB struct to know how many samples were processed.
@@ -95,6 +84,27 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetDeviceSampleRateFB(
 #endif // XR_EXTENSION_PROTOTYPES
 #endif // !XR_NO_PROTOTYPES
 
+#endif // XR_FB_haptic_pcm
+
+// ============================================================================
+// Begin Backwards Compatibility (DEPRECATED)
+// ============================================================================
+
+#ifndef XR_FBX_haptic_pcm
+#define XR_FBX_haptic_pcm 1
+#define XR_FBX1_haptic_pcm_SPEC_VERSION 1
+#define XR_FBX1_HAPTIC_PCM_EXTENSION_NAME "XR_FBX1_haptic_pcm"
+
+#ifdef XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
+#if XR_FB_haptic_pcm_EXPERIMENTAL_VERSION == 1
+#undef XR_FB_haptic_pcm_SPEC_VERSION
+#undef XR_FB_HAPTIC_PCM_EXTENSION_NAME
+#define XR_FB_haptic_pcm_SPEC_VERSION XR_FBX1_haptic_pcm_SPEC_VERSION
+#define XR_FB_HAPTIC_PCM_EXTENSION_NAME XR_FBX1_HAPTIC_PCM_EXTENSION_NAME
+#else
+#error "unknown experimental version for XR_FB_haptic_pcm"
+#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
+#endif
 #ifdef XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
 
 #if XR_FB_haptic_pcm_EXPERIMENTAL_VERSION >= 1
@@ -145,8 +155,7 @@ xrGetDevicePCMSampleRateFB(XrSession session, XrDevicePcmSampleRateGetInfoFB* de
 
 #endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
 
-#endif // XR_FB_haptic_pcm
-
+#endif // XR_FBX_haptic_pcm
 #ifdef __cplusplus
 }
 #endif

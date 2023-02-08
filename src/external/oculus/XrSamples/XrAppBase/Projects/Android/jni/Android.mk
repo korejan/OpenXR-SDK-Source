@@ -7,12 +7,13 @@ include ../../../../cflags.mk
 
 LOCAL_C_INCLUDES := \
 					$(LOCAL_PATH)/../../../../../SampleCommon/Src \
-                    $(LOCAL_PATH)/../../../../../SampleXrFramework/Src \
-  					$(LOCAL_PATH)/../../../../../1stParty/OVR/Include \
-  					$(LOCAL_PATH)/../../../../../1stParty/utilities/include \
-  					$(LOCAL_PATH)/../../../../../3rdParty/stb/src \
-  					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/include \
-  					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/src/common \
+					$(LOCAL_PATH)/../../../../../SampleXrFramework/Src \
+					$(LOCAL_PATH)/../../../../../1stParty/OVR/Include \
+					$(LOCAL_PATH)/../../../../../1stParty/utilities/include \
+					$(LOCAL_PATH)/../../../../../3rdParty/stb/src \
+					$(LOCAL_PATH)/../../../../../OpenXR/Include \
+					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/include \
+					$(LOCAL_PATH)/../../../../../3rdParty/khronos/openxr/OpenXR-SDK/src/common \
 
 LOCAL_SRC_FILES		:= 	../../../Src/main.cpp \
 

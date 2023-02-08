@@ -132,7 +132,11 @@ class SimpleTargetMenu : public OVRFW::VRMenu {
     virtual ~SimpleTargetMenu(){};
 };
 
-bool TinyUI::Init(const xrJava* context, OVRFW::ovrFileSys* FileSys, bool updateColors) {
+bool TinyUI::Init(
+    const xrJava* context,
+    OVRFW::ovrFileSys* FileSys,
+    bool updateColors /* = true */,
+    int fontVertexBufferSize /* = 0 */) {
     const xrJava* java = context;
     UpdateColors = updateColors;
 
@@ -163,7 +167,13 @@ bool TinyUI::Init(const xrJava* context, OVRFW::ovrFileSys* FileSys, bool update
         ALOGE("Couldn't create GUI");
         return false;
     }
-    GuiSys->Init(FileSys, *SoundEffectPlayer, fontName.c_str(), DebugLines);
+
+    if (fontVertexBufferSize > 0) {
+        GuiSys->Init(
+            FileSys, *SoundEffectPlayer, fontName.c_str(), DebugLines, fontVertexBufferSize);
+    } else { // Rely on default value for fontVertexBufferSize
+        GuiSys->Init(FileSys, *SoundEffectPlayer, fontName.c_str(), DebugLines);
+    }
 
     return true;
 }
@@ -188,7 +198,11 @@ void TinyUI::Update(const OVRFW::ovrApplFrameIn& in) {
     if (UpdateColors) {
         for (auto& device : PreviousFrameDevices) {
             if (device.hitObject) {
-                device.hitObject->SetSurfaceColor(0, BackgroundColor);
+                // Don't change colors for normal labels
+                auto it = ButtonHandlers.find(device.hitObject);
+                if (it != ButtonHandlers.end()) {
+                    device.hitObject->SetSurfaceColor(0, BackgroundColor);
+                }
             }
         }
     }

@@ -10,6 +10,7 @@ Authors     :   John Carmack
 *************************************************************************************/
 
 #include "SceneView.h"
+#include "ModelAnimationUtils.h"
 #include "ModelRender.h"
 
 #include <algorithm>
@@ -373,85 +374,6 @@ void ModelInScene::SetModelFile(const ModelFile* mf) {
     }
 };
 
-static Vector3f AnimationInterpolateVector3f(
-    float* buffer,
-    int frame,
-    float fraction,
-    ModelAnimationInterpolation interpolationType) {
-    Vector3f firstElement;
-    firstElement.x = buffer[frame * 3 + 0];
-    firstElement.y = buffer[frame * 3 + 1];
-    firstElement.z = buffer[frame * 3 + 2];
-    Vector3f secondElement;
-    secondElement.x = buffer[frame * 3 + 3];
-    secondElement.y = buffer[frame * 3 + 4];
-    secondElement.z = buffer[frame * 3 + 5];
-
-    if (interpolationType == MODEL_ANIMATION_INTERPOLATION_LINEAR) {
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_STEP) {
-        if (fraction >= 1.0f) {
-            return secondElement;
-        } else {
-            return firstElement;
-        }
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE) {
-        // #TODO implement MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE
-        ALOGW("MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE not implemented");
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE) {
-        // #TODO implement MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE
-        ALOGW("MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE not implemented");
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else {
-        ALOGW("inavlid interpolation type on animation");
-        return firstElement;
-    }
-}
-
-static Quatf AnimationInterpolateQuatf(
-    float* buffer,
-    int frame,
-    float fraction,
-    ModelAnimationInterpolation interpolationType) {
-    Quatf firstElement;
-    firstElement.x = buffer[frame * 4 + 0];
-    firstElement.y = buffer[frame * 4 + 1];
-    firstElement.z = buffer[frame * 4 + 2];
-    firstElement.w = buffer[frame * 4 + 3];
-    Quatf secondElement;
-    secondElement.x = buffer[frame * 4 + 4];
-    secondElement.y = buffer[frame * 4 + 5];
-    secondElement.z = buffer[frame * 4 + 6];
-    secondElement.w = buffer[frame * 4 + 7];
-
-    if (interpolationType == MODEL_ANIMATION_INTERPOLATION_LINEAR) {
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_STEP) {
-        if (fraction >= 1.0f) {
-            return secondElement;
-        } else {
-            return firstElement;
-        }
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE) {
-        ALOGW(
-            "MODEL_ANIMATION_INTERPOLATION_CATMULLROMSPLINE does not make sense for quaternions.");
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else if (interpolationType == MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE) {
-        ALOGW("MODEL_ANIMATION_INTERPOLATION_CUBICSPLINE does not make sense for quaternions.");
-        firstElement = firstElement.Lerp(secondElement, fraction);
-        return firstElement;
-    } else {
-        ALOGW("inavlid interpolation type on animation");
-        return firstElement;
-    }
-}
-
 void ModelInScene::AnimateJoints(const double timeInSeconds) {
     // new animation method.
     {
@@ -460,46 +382,7 @@ void ModelInScene::AnimateJoints(const double timeInSeconds) {
                 MODEL_ANIMATION_TIME_TYPE_LOOP_FORWARD, (float)timeInSeconds);
 
             for (int i = 0; i < static_cast<int>(State.mf->Animations.size()); i++) {
-                const ModelAnimation& animation = State.mf->Animations[i];
-                for (int j = 0; j < static_cast<int>(animation.channels.size()); j++) {
-                    const ModelAnimationChannel& channel = animation.channels[j];
-                    ModelNodeState& nodeState = State.nodeStates[channel.nodeIndex];
-                    ModelAnimationTimeLineState& timeLineState =
-                        State.animationTimelineStates[channel.sampler->timeLineIndex];
-
-                    float* bufferData = (float*)(channel.sampler->output->BufferData());
-                    if (channel.path == MODEL_ANIMATION_PATH_TRANSLATION) {
-                        Vector3f translation = AnimationInterpolateVector3f(
-                            bufferData,
-                            timeLineState.frame,
-                            timeLineState.fraction,
-                            channel.sampler->interpolation);
-                        nodeState.translation = translation;
-                    } else if (channel.path == MODEL_ANIMATION_PATH_SCALE) {
-                        Vector3f scale = AnimationInterpolateVector3f(
-                            bufferData,
-                            timeLineState.frame,
-                            timeLineState.fraction,
-                            channel.sampler->interpolation);
-                        nodeState.scale = scale;
-                    } else if (channel.path == MODEL_ANIMATION_PATH_ROTATION) {
-                        Quatf rotation = AnimationInterpolateQuatf(
-                            bufferData,
-                            timeLineState.frame,
-                            timeLineState.fraction,
-                            channel.sampler->interpolation);
-                        nodeState.rotation = rotation;
-                    } else if (channel.path == MODEL_ANIMATION_PATH_WEIGHTS) {
-                        ALOGW(
-                            "Weights animation not currently supported on channel %d '%s'",
-                            j,
-                            animation.name.c_str());
-                    } else {
-                        ALOGW("Bad animation path on channel %d '%s'", j, animation.name.c_str());
-                    }
-
-                    nodeState.CalculateLocalTransform();
-                }
+                ApplyAnimation(State, i);
             }
 
             for (int i = 0; i < static_cast<int>(State.nodeStates.size()); i++) {

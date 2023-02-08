@@ -216,6 +216,8 @@ struct ModelSurface {
 
     const ModelMaterial* material; // material used to render this surface
     ovrSurfaceDef surfaceDef;
+    VertexAttribs attribs; // Only populated if morph targets are used
+    std::vector<VertexAttribs> targets;
 };
 
 struct Model {
@@ -282,6 +284,7 @@ class ModelNode {
     OVR::Quatf rotation;
     OVR::Vector3f translation;
     OVR::Vector3f scale;
+    std::vector<float> weights;
 
     std::vector<int> children;
     int parentIndex;
@@ -326,9 +329,14 @@ typedef enum {
 } ModelAnimationPath;
 
 struct ModelAnimationChannel {
-    ModelAnimationChannel() : nodeIndex(-1), sampler(nullptr), path(MODEL_ANIMATION_PATH_UNKNOWN) {}
+    ModelAnimationChannel()
+        : nodeIndex(-1),
+          additiveWeightIndex(-1),
+          sampler(nullptr),
+          path(MODEL_ANIMATION_PATH_UNKNOWN) {}
 
     int nodeIndex;
+    int additiveWeightIndex;
     const ModelAnimationSampler* sampler;
     ModelAnimationPath path;
 };
@@ -411,6 +419,7 @@ class ModelNodeState {
     OVR::Quatf rotation;
     OVR::Vector3f translation;
     OVR::Vector3f scale;
+    std::vector<float> weights;
 
    private:
     OVR::Matrix4f localTransform;

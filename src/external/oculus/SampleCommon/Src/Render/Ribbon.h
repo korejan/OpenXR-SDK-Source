@@ -31,6 +31,8 @@ class ovrRibbon {
         const ovrPointList& pointList,
         const OVR::Matrix4f& centerViewMatrix,
         const bool invertAlpha);
+    void SetColor(const OVR::Vector4f& color);
+    void SetWidth(const float width);
     void GenerateSurfaceList(std::vector<ovrDrawSurface>& surfaceList) const;
 
    private:

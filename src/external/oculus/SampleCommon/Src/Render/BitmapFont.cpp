@@ -1083,7 +1083,7 @@ class BitmapFontSurfaceLocal : public BitmapFontSurface {
 
     mutable ovrSurfaceDef FontSurfaceDef;
 
-    fontVertex_t* Vertices; // vertices that are written to the VBO
+    fontVertex_t* Vertices; // vertices that are written to the VBO. Fixed size to not overflow VBO
     int MaxVertices;
     int MaxIndices;
     int CurVertex; // reset every Render()
@@ -2346,6 +2346,22 @@ void BitmapFontSurfaceLocal::Finish(Matrix4f const& viewMatrix) {
         for (int j = 0; j < vb.NumVerts; j++) {
             fontVertex_t const& v = vb.Verts[j];
             Vector3f const position = transform.Transform(v.xyz);
+
+            // If you hit this assert you're likely trying to draw
+            // too much text for the current buffer size,
+            // most likely need to update the value
+            // passed to fontSurface->Init() in OvrGuiSysLocal::Init
+            //
+            // Note: Vertices is *not* a dynamic std::vector
+            // because it gets copies into GPU memory, which is reserved
+            // separately. If you decide to make this system dynamic
+            // remember to scale re-allocate the OpenGL VBOs as well
+            if (CurVertex >= MaxVertices) {
+                OVR_FAIL(
+                    "Application tried to draw more text than there is buffer for. "
+                    "This failure protects agains a buffer overflow");
+            }
+
             Vertices[CurVertex].xyz = position;
             Vertices[CurVertex].s = v.s;
             Vertices[CurVertex].t = v.t;

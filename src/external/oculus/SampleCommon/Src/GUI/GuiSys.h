@@ -66,7 +66,8 @@ class OvrGuiSys {
         ovrFileSys* FileSys,
         SoundEffectPlayer& soundEffectPlayer,
         char const* fontName,
-        OvrDebugLines* debugLines) = 0;
+        OvrDebugLines* debugLines,
+        int fontVertexBufferSize = 8192) = 0;
     // Init with a custom font surface for larger-than-normal amounts of text.
     virtual void Init(
         ovrFileSys* FileSys,

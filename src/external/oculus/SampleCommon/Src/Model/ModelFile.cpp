@@ -600,6 +600,7 @@ void ModelNodeState::GenerateStateFromNode(const ModelNode* _node, ModelState* _
     rotation = node->rotation;
     translation = node->translation;
     scale = node->scale;
+    weights = node->weights;
 
     // These values should be calculated already.
     localTransform = node->GetLocalTransform();

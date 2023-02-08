@@ -936,8 +936,7 @@ int main() {
             viewportConfigType,
             viewportConfigType == supportedViewConfigType ? "Selected" : "");
 
-        XrViewConfigurationProperties viewportConfig;
-        viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+        XrViewConfigurationProperties viewportConfig = {XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
         OXR(xrGetViewConfigurationProperties(
             app.Instance, app.SystemId, viewportConfigType, &viewportConfig));
         ALOGV(

@@ -4837,11 +4837,17 @@ struct VulkanGraphicsPluginLegacy final : public VulkanGraphicsPlugin {
         CHECK_XRCMD(pfnGetVulkanInstanceExtensionsKHR(instance, createInfo->systemId, 0, &extensionNamesSize, nullptr));
 
         std::vector<char> extensionNames(extensionNamesSize);
-        CHECK_XRCMD(pfnGetVulkanInstanceExtensionsKHR(instance, createInfo->systemId, extensionNamesSize, &extensionNamesSize,
-                                                      &extensionNames[0]));
+        if (extensionNamesSize > 0) {
+            CHECK_XRCMD(pfnGetVulkanInstanceExtensionsKHR(instance, createInfo->systemId, extensionNamesSize, &extensionNamesSize,
+                &extensionNames[0]));
+        }
+
         {
             // Note: This cannot outlive the extensionNames above, since it's just a collection of views into that string!
-            std::vector<const char*> extensions = ParseExtensionString(&extensionNames[0]);
+            std::vector<const char*> extensions{};
+            if (extensionNamesSize > 0) {
+                extensions = ParseExtensionString(&extensionNames[0]);
+            }
 
             // Merge the runtime's request with the applications requests
             for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; ++i) {
@@ -4875,9 +4881,9 @@ struct VulkanGraphicsPluginLegacy final : public VulkanGraphicsPlugin {
         }
         {
             // Note: This cannot outlive the extensionNames above, since it's just a collection of views into that string!
-            std::vector<const char*> extensions;
+            std::vector<const char*> extensions{};
             if (deviceExtensionNamesSize > 0) {
-                ParseExtensionString(&deviceExtensionNames[0]);
+                extensions = ParseExtensionString(&deviceExtensionNames[0]);
             }
 
             // Merge the runtime's request with the applications requests

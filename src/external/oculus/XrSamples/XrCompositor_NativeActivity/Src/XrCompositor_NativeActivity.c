@@ -2962,8 +2962,7 @@ void android_main(struct android_app* app) {
             viewportConfigType,
             viewportConfigType == supportedViewConfigType ? "Selected" : "");
 
-        XrViewConfigurationProperties viewportConfig;
-        viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+        XrViewConfigurationProperties viewportConfig = {XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
         OXR(xrGetViewConfigurationProperties(
             appState.Instance, appState.SystemId, viewportConfigType, &viewportConfig));
         ALOGV(

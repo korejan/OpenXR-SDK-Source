@@ -37,7 +37,12 @@ class TinyUI {
         bool clicked = false;
     };
 
-    bool Init(const xrJava* context, OVRFW::ovrFileSys* FileSys, bool updateColors = true);
+    bool Init(
+        const xrJava* context,
+        OVRFW::ovrFileSys* FileSys,
+        bool updateColors = true,
+        // 0 means use default size (8KB at the time of writing this comment)
+        int fontVertexBufferSize = 0);
     void Shutdown();
     void Update(const OVRFW::ovrApplFrameIn& in);
     void Render(const OVRFW::ovrApplFrameIn& in, OVRFW::ovrRendererOutput& out);

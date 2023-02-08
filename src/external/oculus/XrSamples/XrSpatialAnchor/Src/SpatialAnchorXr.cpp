@@ -77,7 +77,7 @@ using namespace OVR;
     printf(__VA_ARGS__); \
     printf("\n")
 #define ALOGW(...)       \
-    printf("WARN: "); \
+    printf("WARN: ");    \
     printf(__VA_ARGS__); \
     printf("\n")
 #define ALOGV(...)       \
@@ -496,7 +496,8 @@ struct ovrApp {
     bool ShouldQueryAnchors;
     bool ShouldShareAnchors;
 
-    std::unique_ptr<SpatialAnchorExternalDataHandler> ExternalDataHandler = std::make_unique<SpatialAnchorFileHandler>();
+    std::unique_ptr<SpatialAnchorExternalDataHandler> ExternalDataHandler =
+        std::make_unique<SpatialAnchorFileHandler>();
 
     // List of users to share Spatial Anchors with, if populated.
     std::vector<XrSpaceUserIdFB> ShareUserList;
@@ -504,7 +505,10 @@ struct ovrApp {
     std::vector<XrUuidEXT> InboundSpatialAnchorList;
 
     std::unordered_map<XrAsyncRequestIdFB, std::vector<XrSpace>> SaveSpaceListCloudEventMap;
-    std::unordered_map<XrAsyncRequestIdFB, std::pair<std::vector<XrSpace>, std::vector<XrSpaceUserFB>>> ShareSpacesEventMap;
+    std::unordered_map<
+        XrAsyncRequestIdFB,
+        std::pair<std::vector<XrSpace>, std::vector<XrSpaceUserFB>>>
+        ShareSpacesEventMap;
 
     XrSwapchain ColorSwapChain;
     uint32_t SwapChainLength;
@@ -894,12 +898,15 @@ void ovrApp::HandleXrEvents() {
                     (XrEventDataSpaceListSaveCompleteFB*)(baseEventHeader);
 
                 if (saveResult->result != XR_SUCCESS) {
-                    ALOGV("xrPollEvent: XR_TYPE_EVENT_DATA_SPACE_LIST_SAVE_COMPLETE_FB came with error result: %d", saveResult->result);
+                    ALOGV(
+                        "xrPollEvent: XR_TYPE_EVENT_DATA_SPACE_LIST_SAVE_COMPLETE_FB came with error result: %d",
+                        saveResult->result);
                 } else {
                     auto requestId = saveResult->requestId;
                     auto itr = SaveSpaceListCloudEventMap.find(requestId);
                     if (itr == SaveSpaceListCloudEventMap.end()) {
-                        ALOGV("xrPollEvent: no requestId found in map for XR_TYPE_EVENT_DATA_SPACE_LIST_SAVE_COMPLETE_FB");
+                        ALOGV(
+                            "xrPollEvent: no requestId found in map for XR_TYPE_EVENT_DATA_SPACE_LIST_SAVE_COMPLETE_FB");
                     } else {
                         if (IsLocalMultiplayerSupported) {
                             auto spaceList = std::move(itr->second);
@@ -976,7 +983,10 @@ void ovrApp::HandleXrEvents() {
                 const XrEventDataSpaceShareCompleteFB* shareResult =
                     (XrEventDataSpaceShareCompleteFB*)(baseEventHeader);
 
-                ALOGV("xrPollEvent: xrShareSpacesFB request %" PRIu64 " completed with result (%d)", shareResult->requestId, shareResult->result);
+                ALOGV(
+                    "xrPollEvent: xrShareSpacesFB request %" PRIu64 " completed with result (%d)",
+                    shareResult->requestId,
+                    shareResult->result);
                 auto itr = ShareSpacesEventMap.find(shareResult->requestId);
                 if (itr != ShareSpacesEventMap.end()) {
                     auto spaces = std::move(itr->second.first);
@@ -999,7 +1009,8 @@ void ovrApp::HandleXrEvents() {
                             sharedUserIds.emplace_back(userId);
                         }
 
-                        ExternalDataHandler->WriteSharedSpatialAnchorList(sharedSpatialAnchors, sharedUserIds);
+                        ExternalDataHandler->WriteSharedSpatialAnchorList(
+                            sharedSpatialAnchors, sharedUserIds);
                     }
                     // We're done with the user handles at this point, so destroy them.
                     for (std::size_t k = 0; k < users.size(); k++) {
@@ -1007,7 +1018,9 @@ void ovrApp::HandleXrEvents() {
                         ALOGV("xrPollEvent: Destroyed user handle %" PRIu64, (uint64_t)users[k]);
                     }
                 } else {
-                    ALOGE("Failed to match xrShareSpacesFB request data to requestId %" PRIu64, shareResult->requestId);
+                    ALOGE(
+                        "Failed to match xrShareSpacesFB request data to requestId %" PRIu64,
+                        shareResult->requestId);
                 }
             } break;
             default:
@@ -1141,16 +1154,12 @@ static void DownloadAnchors(ovrApp& app) {
     }
 
     XrSpaceStorageLocationFilterInfoFB locationFilterInfo = {
-        XR_TYPE_SPACE_STORAGE_LOCATION_FILTER_INFO_FB,
-        nullptr,
-        XR_SPACE_STORAGE_LOCATION_CLOUD_FB
-    };
+        XR_TYPE_SPACE_STORAGE_LOCATION_FILTER_INFO_FB, nullptr, XR_SPACE_STORAGE_LOCATION_CLOUD_FB};
     XrSpaceUuidFilterInfoFB uuidFilterInfo = {
         XR_TYPE_SPACE_UUID_FILTER_INFO_FB,
         &locationFilterInfo,
         (uint32_t)app.InboundSpatialAnchorList.size(),
-        app.InboundSpatialAnchorList.data()
-    };
+        app.InboundSpatialAnchorList.data()};
     XrSpaceQueryInfoFB queryInfo = {
         XR_TYPE_SPACE_QUERY_INFO_FB,
         nullptr,
@@ -1172,20 +1181,33 @@ static void UploadAndShareAnchors(ovrApp& app) {
         return;
     }
 
+    std::vector<XrSpace> spaceList;
+    for (XrSpace space : app.AppRenderer.Scene.SpaceList) {
+        // We will only upload Anchors that are Storable and Sharable.
+        XrSpaceComponentStatusFB storableStatus;
+        XrSpaceComponentStatusFB sharableStatus;
+        OXR(app.FunPtrs.xrGetSpaceComponentStatusFB(
+            space, XR_SPACE_COMPONENT_TYPE_STORABLE_FB, &storableStatus));
+        OXR(app.FunPtrs.xrGetSpaceComponentStatusFB(
+            space, XR_SPACE_COMPONENT_TYPE_SHARABLE_FB, &sharableStatus));
+        if (storableStatus.enabled && sharableStatus.enabled) {
+            spaceList.push_back(space);
+        }
+    }
+
     XrAsyncRequestIdFB saveRequest;
     XrSpaceListSaveInfoFB saveInfo = {
         XR_TYPE_SPACE_LIST_SAVE_INFO_FB,
         nullptr,
-        static_cast<uint32_t>(app.AppRenderer.Scene.SpaceList.size()),
-        app.AppRenderer.Scene.SpaceList.data(),
-        XR_SPACE_STORAGE_LOCATION_CLOUD_FB
-    };
+        static_cast<uint32_t>(spaceList.size()),
+        spaceList.data(),
+        XR_SPACE_STORAGE_LOCATION_CLOUD_FB};
     OXR(app.FunPtrs.xrSaveSpaceListFB(app.Session, &saveInfo, &saveRequest));
 
     // The rest will continue on the completion of xrSaveSpaceListFB.
-    // Add the current spaces to the map. This step needs to be a copy here because we're taking a snapshot
-    // of the Spatial Anchors in the app state.
-    app.SaveSpaceListCloudEventMap[saveRequest] = app.AppRenderer.Scene.SpaceList;
+    // Add the current spaces to the map. This step needs to be a copy here because we're taking a
+    // snapshot of the Spatial Anchors in the app state.
+    app.SaveSpaceListCloudEventMap[saveRequest] = spaceList;
 }
 
 void UpdateStageBounds(ovrApp& app) {
@@ -1475,12 +1497,13 @@ int main() {
 
     {
         const char* deviceQuestProName = "Meta Quest Pro";
-        if (strcmp(systemProperties.systemName, deviceQuestProName) == 0) {
+        const char* deviceQuest2Name = "Oculus Quest2";
+        if (strcmp(systemProperties.systemName, deviceQuestProName) == 0 || strcmp(systemProperties.systemName, deviceQuest2Name) == 0) {
             ALOGV("Local multiplayer is supported on this device");
             app.IsLocalMultiplayerSupported = true;
         } else {
             ALOGW(
-                "Local multiplayer is currently only supported on Meta Quest Pro. Local multiplayer features in this app are not available on Quest 1 or 2.");
+                "Local multiplayer is currently only supported on Meta Quest 2 or above. Local multiplayer features in this app are not available on Quest 1.");
             app.IsLocalMultiplayerSupported = false;
         }
     }
@@ -1591,8 +1614,7 @@ int main() {
             viewportConfigType,
             viewportConfigType == supportedViewConfigType ? "Selected" : "");
 
-        XrViewConfigurationProperties viewportConfig;
-        viewportConfig.type = XR_TYPE_VIEW_CONFIGURATION_PROPERTIES;
+        XrViewConfigurationProperties viewportConfig = {XR_TYPE_VIEW_CONFIGURATION_PROPERTIES};
         OXR(xrGetViewConfigurationProperties(
             instance, app.SystemId, viewportConfigType, &viewportConfig));
         ALOGV(
@@ -1805,9 +1827,7 @@ int main() {
         "xrCreateSpatialAnchorFB",
         (PFN_xrVoidFunction*)(&app.FunPtrs.xrCreateSpatialAnchorFB)));
     OXR(xrGetInstanceProcAddr(
-        instance,
-        "xrGetSpaceUuidFB",
-        (PFN_xrVoidFunction*)(&app.FunPtrs.xrGetSpaceUuidFB)));
+        instance, "xrGetSpaceUuidFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrGetSpaceUuidFB)));
     OXR(xrGetInstanceProcAddr(
         instance,
         "xrEnumerateSpaceSupportedComponentsFB",
@@ -1831,25 +1851,17 @@ int main() {
     OXR(xrGetInstanceProcAddr(
         instance, "xrEraseSpaceFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrEraseSpaceFB)));
     OXR(xrGetInstanceProcAddr(
-        instance,
-        "xrSaveSpaceListFB",
-        (PFN_xrVoidFunction*)(&app.FunPtrs.xrSaveSpaceListFB)));
+        instance, "xrSaveSpaceListFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrSaveSpaceListFB)));
     OXR(xrGetInstanceProcAddr(
-        instance,
-        "xrCreateSpaceUserFB",
-        (PFN_xrVoidFunction*)(&app.FunPtrs.xrCreateSpaceUserFB)));
+        instance, "xrCreateSpaceUserFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrCreateSpaceUserFB)));
     OXR(xrGetInstanceProcAddr(
-        instance,
-        "xrGetSpaceUserIdFB",
-        (PFN_xrVoidFunction*)(&app.FunPtrs.xrGetSpaceUserIdFB)));
+        instance, "xrGetSpaceUserIdFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrGetSpaceUserIdFB)));
     OXR(xrGetInstanceProcAddr(
         instance,
         "xrDestroySpaceUserFB",
         (PFN_xrVoidFunction*)(&app.FunPtrs.xrDestroySpaceUserFB)));
     OXR(xrGetInstanceProcAddr(
-        instance,
-        "xrShareSpacesFB",
-        (PFN_xrVoidFunction*)(&app.FunPtrs.xrShareSpacesFB)));
+        instance, "xrShareSpacesFB", (PFN_xrVoidFunction*)(&app.FunPtrs.xrShareSpacesFB)));
 
     // Create and start passthrough
     XrPassthroughFB passthrough = XR_NULL_HANDLE;

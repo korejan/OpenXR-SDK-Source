@@ -59,6 +59,8 @@ class GeometryBuilder {
         return nodes_;
     }
 
+    void clear_nodes();
+
    private:
     std::vector<OVRFW::GeometryBuilder::Node> nodes_;
 };

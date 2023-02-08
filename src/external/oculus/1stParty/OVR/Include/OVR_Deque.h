@@ -30,6 +30,8 @@
 
 #include <cstdlib>
 
+#include "OVR_Types.h"
+
 namespace OVR {
 
 #define OVR_ALLOC malloc

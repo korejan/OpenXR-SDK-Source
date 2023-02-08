@@ -46,7 +46,7 @@ class GeometryRenderer {
    public:
     OVR::Vector4f ChannelControl = {1, 1, 1, 1};
     OVR::Vector4f DiffuseColor = {0.4, 1.0, 0.2, 1.0};
-    OVR::Vector3f SpecularLightDirection = {1, 1, 1};
+    OVR::Vector3f SpecularLightDirection = OVR::Vector3f{1, 1, 1}.Normalized();
     OVR::Vector3f SpecularLightColor = {1, 1, 1};
     OVR::Vector3f AmbientLightColor = {.1, .1, .1};
     GLenum BlendSrc = GL_SRC_ALPHA;

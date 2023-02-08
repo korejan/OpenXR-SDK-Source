@@ -133,7 +133,8 @@ class OvrGuiSysLocal : public OvrGuiSys {
         ovrFileSys* fileSysArg,
         OvrGuiSys::SoundEffectPlayer& soundEffectPlayer,
         char const* fontName,
-        OvrDebugLines* debugLines) override;
+        OvrDebugLines* debugLines,
+        int fontVertexBufferSize /* = 8192*/) override;
     // Init with a custom font surface for larger-than-normal amounts of text.
     virtual void Init(
         ovrFileSys* fileSysArg,
@@ -396,9 +397,10 @@ void OvrGuiSysLocal::Init(
     ovrFileSys* fileSysArg,
     OvrGuiSys::SoundEffectPlayer& soundEffectPlayer,
     char const* fontName,
-    OvrDebugLines* debugLines) {
+    OvrDebugLines* debugLines,
+    int fontVertexBufferSize /* = 8192*/) {
     BitmapFontSurface* fontSurface = BitmapFontSurface::Create();
-    fontSurface->Init(8192);
+    fontSurface->Init(fontVertexBufferSize);
     Init(fileSysArg, soundEffectPlayer, fontName, fontSurface, debugLines);
 }
 

@@ -142,7 +142,7 @@ void ovrBeamRenderer::Init(const int maxBeams, const bool depthTest) {
     gc.GpuState.blendSrc = GL_SRC_ALPHA;
     gc.GpuState.blendDst = GL_ONE;
     gc.Program = TextureProgram;
-    gc.GpuState.lineWidth = 2.0f;
+    gc.GpuState.lineWidth = 1.0f;
 }
 
 //==============================

@@ -161,6 +161,14 @@ void ovrRibbon::AddPoint(ovrPointList& pointList, const OVR::Vector3f& point) {
     pointList.AddToTail(point);
 }
 
+void ovrRibbon::SetColor(const OVR::Vector4f& color) {
+    Color = color;
+}
+
+void ovrRibbon::SetWidth(const float width) {
+    HalfWidth = width;
+}
+
 void ovrRibbon::Update(
     const ovrPointList& pointList,
     const OVR::Matrix4f& centerViewMatrix,

@@ -26,29 +26,9 @@ XR_DEFINE_HANDLE(XrBodyTrackerFB)
 #define XR_FB_body_tracking_SPEC_VERSION 1
 #define XR_FB_BODY_TRACKING_EXTENSION_NAME "XR_FB_body_tracking"
 
-#define XR_FBX1_body_tracking_SPEC_VERSION 1
-#define XR_FBX1_BODY_TRACKING_EXTENSION_NAME "XR_FBX1_body_tracking"
-#define XR_FBX2_body_tracking_SPEC_VERSION 2
-#define XR_FBX2_BODY_TRACKING_EXTENSION_NAME "XR_FBX2_body_tracking"
-
-// While experimental, the experimental version must be set to get extension definitions
-#if defined(XR_FB_body_tracking_EXPERIMENTAL_VERSION)
-#if XR_FB_body_tracking_EXPERIMENTAL_VERSION == 2
-#undef XR_FB_body_tracking_SPEC_VERSION
-#undef XR_FB_BODY_TRACKING_EXTENSION_NAME
-#define XR_FB_body_tracking_SPEC_VERSION XR_FBX2_body_tracking_SPEC_VERSION
-#define XR_FB_BODY_TRACKING_EXTENSION_NAME XR_FBX2_BODY_TRACKING_EXTENSION_NAME
-#elif defined(XR_FB_body_tracking_EXPERIMENTAL_VERSION)
-// Error if the chosen experimental version is different than the available in this header
-#error "unknown experimental version number for XR_FB_body_tracking_EXPERIMENTAL_VERSION"
-#endif // switch by XR_FB_body_tracking_EXPERIMENTAL_VERSION
-#endif // defined(XR_FB_body_tracking_EXPERIMENTAL_VERSION)
-
 XR_STRUCT_ENUM(XR_TYPE_BODY_TRACKER_CREATE_INFO_FB, 1000076001);
 XR_STRUCT_ENUM(XR_TYPE_BODY_JOINTS_LOCATE_INFO_FB, 1000076002);
-XR_STRUCT_ENUM(XR_TYPE_BODY_JOINT_LOCATIONS_V1_FB, 1000076003);
 XR_STRUCT_ENUM(XR_TYPE_BODY_JOINT_LOCATIONS_FB, 1000076005);
-#define XR_TYPE_BODY_JOINT_LOCATIONS_V2_FB XR_TYPE_BODY_JOINT_LOCATIONS_FB
 XR_STRUCT_ENUM(XR_TYPE_BODY_SKELETON_FB, 1000076006);
 
 XR_STRUCT_ENUM(XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB, 1000076004);
@@ -168,16 +148,6 @@ typedef struct XrBodyJointLocationsFB {
     uint32_t skeletonChangedCount;
     XrTime time;
 } XrBodyJointLocationsFB;
-#define XrBodyJointLocationsV2FB XrBodyJointLocationsFB
-
-typedef struct XrBodyJointLocationsV1FB {
-    XrStructureType type;
-    void* XR_MAY_ALIAS next;
-    XrBool32 isActive;
-    float confidence;
-    uint32_t jointCount;
-    XrBodyJointLocationFB* jointLocations;
-} XrBodyJointLocationsV1FB;
 
 typedef struct XrBodySkeletonJointFB {
     int32_t joint;
@@ -206,11 +176,33 @@ typedef XrResult(XRAPI_PTR* PFN_xrLocateBodyJointsFB)(
 typedef XrResult(
     XRAPI_PTR* PFN_xrGetBodySkeletonFB)(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB* skeleton);
 
-#if defined(XR_FB_body_tracking_EXPERIMENTAL_VERSION) && \
-    (XR_FB_body_tracking_EXPERIMENTAL_VERSION == 2)
-typedef XrResult(
-    XRAPI_PTR* PFN_xrGetSkeletonFB)(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB* skeleton);
-#endif
+#endif // XR_FB_body_tracking
+
+// ============================================================================
+// Begin Backwards Compatibility (DEPRECATED)
+// ============================================================================
+
+#ifndef XR_FBX_body_tracking
+#define XR_FBX_body_tracking 1
+#define XR_FBX1_body_tracking_SPEC_VERSION 1
+#define XR_FBX1_BODY_TRACKING_EXTENSION_NAME "XR_FBX1_body_tracking"
+#define XR_FBX2_body_tracking_SPEC_VERSION 2
+#define XR_FBX2_BODY_TRACKING_EXTENSION_NAME "XR_FBX2_body_tracking"
+
+XR_STRUCT_ENUM(XR_TYPE_BODY_JOINT_LOCATIONS_V1_FB, 1000076003);
+
+#define XR_TYPE_BODY_JOINT_LOCATIONS_V2_FB XR_TYPE_BODY_JOINT_LOCATIONS_FB
+
+#define XrBodyJointLocationsV2FB XrBodyJointLocationsFB
+
+typedef struct XrBodyJointLocationsV1FB {
+    XrStructureType type;
+    void* XR_MAY_ALIAS next;
+    XrBool32 isActive;
+    float confidence;
+    uint32_t jointCount;
+    XrBodyJointLocationFB* jointLocations;
+} XrBodyJointLocationsV1FB;
 
 #ifndef XR_NO_PROTOTYPES
 #ifdef XR_EXTENSION_PROTOTYPES
@@ -245,7 +237,11 @@ xrGetSkeletonFB(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB* skeleton);
 #endif /* XR_EXTENSION_PROTOTYPES */
 #endif /* !XR_NO_PROTOTYPES */
 
-#endif // XR_FB_body_tracking
+#endif // XR_FBX_body_tracking
+
+// ============================================================================
+// End Backwards Compatibility (DEPRECATED)
+// ============================================================================
 
 #if defined(__cplusplus)
 }

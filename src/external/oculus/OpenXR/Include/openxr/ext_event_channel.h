@@ -27,7 +27,7 @@ Contacts :
 extern "C" {
 #endif
 
-// Extension 113
+// Extension 171
 #ifndef XR_EXT_event_channel
 #define XR_EXT_event_channel 1
 

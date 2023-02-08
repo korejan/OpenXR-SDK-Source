@@ -56,7 +56,8 @@ const char* GeometryVertexShaderSrc = R"glsl(
 #endif /// HAS_VERTEX_COLORS
         lowp vec3 eye = transposeMultiply( sm.ViewMatrix[VIEW_ID], -vec3( sm.ViewMatrix[VIEW_ID][3] ) );
         oEye = eye - vec3( ModelMatrix * Position );
-        oNormal = multiply( ModelMatrix, Normal );
+        // This matrix math should ideally not be done in the shader for perf reasons:
+        oNormal = multiply( transpose(inverse(ModelMatrix)), Normal );
     }
 )glsl";
 
@@ -98,9 +99,10 @@ static const char* GeometryFragmentShaderSrc = R"glsl(
         lowp float nDotL = max( dot( Normal, SpecularLightDirection ), 0.0 );
         lowp vec3 diffuseValue = diffuse.xyz * nDotL;
 
-        lowp vec3 H = normalize( SpecularLightDirection + eyeDir );
-        lowp float nDotH = max( dot( Normal, H ), 0.0 );
-        lowp vec3 specularValue = pow16( nDotH ) * SpecularLightColor;
+        lowp vec3 reflectDir = reflect( -SpecularLightDirection, Normal );
+        lowp float specular = pow16(max(dot(eyeDir, reflectDir), 0.0));
+        lowp float specularStrength = 1.0;
+        lowp vec3 specularValue = specular * specularStrength * SpecularLightColor;
 
         lowp vec3 color = diffuseValue * ChannelControl.x
                         + ambientValue * ChannelControl.y
