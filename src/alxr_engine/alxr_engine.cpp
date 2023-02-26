@@ -116,6 +116,8 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
         options->NoFrameSkip = ctx.noFrameSkip;
         options->DisableLocalDimming = ctx.disableLocalDimming;
         options->DisplayColorSpace = static_cast<XrColorSpaceFB>(ctx.displayColorSpace);
+        const auto& fmVersion = ctx.firmwareVersion;
+        options->firmwareVersion = { fmVersion.major, fmVersion.minor, fmVersion.patch };
         if (options->GraphicsPlugin.empty())
             options->GraphicsPlugin = graphics_api_str(ctx.graphicsApi);
 

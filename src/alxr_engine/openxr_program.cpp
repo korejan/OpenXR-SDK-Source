@@ -635,6 +635,16 @@ struct OpenXrProgram final : IOpenXrProgram {
         return rtType == m_runtimeType;
     }
 
+    inline bool IsPrePicoPUIv5_4() const {
+#ifdef XR_USE_OXR_PICO_ANY_VERSION
+        assert(IsRuntime(OxrRuntimeType::Pico));
+        static constexpr const FirmwareVersion PicoPUIv5_4{ 5,4,0 };
+        return m_options->firmwareVersion < PicoPUIv5_4;
+#else
+        return false;
+#endif
+    }
+
     void LogInstanceInfo() {
         CHECK(m_instance != XR_NULL_HANDLE && m_graphicsPlugin != nullptr);
 
@@ -648,12 +658,16 @@ struct OpenXrProgram final : IOpenXrProgram {
             GetXrVersionString(instanceProperties.runtimeVersion).c_str()));
 
         m_runtimeType = FromString(instanceProperties.runtimeName);
+
+        const bool enableSRGBLinearization = [this]() {
+            if (IsPrePicoPUIv5_4())
+                return false;
+            return !(m_options->DisableLinearizeSrgb || IsRuntime(OxrRuntimeType::HTCWave));
+        }();
+        m_graphicsPlugin->SetEnableLinearizeRGB(enableSRGBLinearization);
 #ifdef XR_USE_OXR_PICO_ANY_VERSION
-        m_graphicsPlugin->SetEnableLinearizeRGB(false);
         m_graphicsPlugin->SetMaskModeParams({ 0.11f, 0.11f, 0.11f });
         m_graphicsPlugin->SetBlendModeParams(0.62f);
-#else
-        m_graphicsPlugin->SetEnableLinearizeRGB(!(m_options->DisableLinearizeSrgb || IsRuntime(OxrRuntimeType::HTCWave)));
 #endif
         m_graphicsPlugin->SetCmdBufferWaitNextFrame(!IsRuntime(OxrRuntimeType::MagicLeap));
     }
@@ -926,22 +940,21 @@ struct OpenXrProgram final : IOpenXrProgram {
         struct timespec ts;
         if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
             return { -1, std::uint64_t(-1) };
-#ifdef XR_USE_OXR_PICO_ANY_VERSION
-#pragma message("Using Pico runtime bug workaround for time conversion.")
-        // 
-        // As of writing, there are bugs in Pico's OXR runtime with either/both:
-        //      * xrLocateSpace for controller action spaces not working with any other times beyond XrFrameState::predicateDisplayTime (and zero, in a non-conforming way).
-        //      * xrConvertTimeToTimespecTimeKHR appears to return values in microseconds instead of nanoseconds and values seem to be completely off from what
-        //        XrFrameState::predicateDisplayTime values are.   
-        //
-        static_assert(sizeof(XrTime) == sizeof(std::int64_t) && std::is_signed< XrTime>::value);
-        constexpr const auto NSecPerSec = 1000000000L;
-        const XrTime xrTimeNow = (static_cast<XrTime>(ts.tv_sec) * NSecPerSec) + ts.tv_nsec;
-#else
+
         XrTime xrTimeNow;
-        if (m_pfnConvertTimespecTimeToTimeKHR(m_instance, &ts, &xrTimeNow) == XR_ERROR_TIME_INVALID)
+        if (IsPrePicoPUIv5_4()) {
+            // 
+            // As of writing, there are bugs in Pico's OXR runtime with either/both:
+            //      * xrLocateSpace for controller action spaces not working with any other times beyond XrFrameState::predicateDisplayTime (and zero, in a non-conforming way).
+            //      * xrConvertTimeToTimespecTimeKHR appears to return values in microseconds instead of nanoseconds and values seem to be completely off from what
+            //        XrFrameState::predicateDisplayTime values are.   
+            //
+            static_assert(sizeof(XrTime) == sizeof(std::int64_t) && std::is_signed< XrTime>::value);
+            constexpr const auto NSecPerSec = 1000000000L;
+            xrTimeNow = (static_cast<XrTime>(ts.tv_sec) * NSecPerSec) + ts.tv_nsec;
+        }
+        else if (m_pfnConvertTimespecTimeToTimeKHR(m_instance, &ts, &xrTimeNow) == XR_ERROR_TIME_INVALID)
             return { -1, std::uint64_t(-1) };
-#endif
         return { xrTimeNow, ToTimeUs(ts) };
 #endif
     }

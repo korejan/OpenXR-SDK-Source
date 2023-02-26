@@ -52,6 +52,59 @@ inline const char* GetXrEnvironmentBlendModeStr(XrEnvironmentBlendMode environme
     }
 }
 
+struct FirmwareVersion {
+
+    std::array<std::uint32_t, 3> parts;
+
+    constexpr inline FirmwareVersion
+    (
+        std::uint32_t major = 0,
+        std::uint32_t minor = 0,
+        std::uint32_t patch = 0
+    ) : parts{ major, minor, patch } {}
+
+    constexpr inline FirmwareVersion(const FirmwareVersion&) noexcept = default;
+    constexpr inline FirmwareVersion& operator=(const FirmwareVersion&) noexcept = default;
+
+    constexpr inline std::uint32_t major() const { return parts[0]; }
+    constexpr inline std::uint32_t minor() const { return parts[1]; }
+    constexpr inline std::uint32_t patch() const { return parts[2]; }
+
+    constexpr inline bool operator==(const FirmwareVersion& rhs) const {
+        for (std::size_t idx = 0; idx < 3; ++idx) {
+            if (parts[idx] != rhs.parts[idx])
+                return false;
+        }
+        return true;
+    }
+
+    constexpr inline bool operator!=(const FirmwareVersion& rhs) const {
+        return !(*this == rhs);
+    }
+
+    constexpr inline bool operator<(const FirmwareVersion& rhs) const {
+        for (std::size_t idx = 0; idx < 2; ++idx) {
+            if (parts[idx] < rhs.parts[idx])
+                return true;
+            if (parts[idx] != rhs.parts[idx])
+                return false;
+        }
+        return parts[2] < rhs.parts[2];
+    }
+
+    constexpr inline bool operator<=(const FirmwareVersion& rhs) const {
+        return (*this < rhs) || (*this == rhs);
+    }
+
+    constexpr inline bool operator>(const FirmwareVersion& rhs) const {
+        return rhs < *this;
+    }
+
+    constexpr inline bool operator>=(const FirmwareVersion& rhs) const {
+        return (*this > rhs) || (*this == rhs);
+    }
+};
+
 struct Options {
     std::string GraphicsPlugin;
 
@@ -62,6 +115,8 @@ struct Options {
     std::string EnvironmentBlendMode{"Opaque"};
 
     std::string AppSpace{"Stage"};
+
+    FirmwareVersion firmwareVersion{};
 
     XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_REC2020_FB;
     bool DisableLinearizeSrgb=false;

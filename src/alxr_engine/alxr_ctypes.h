@@ -74,6 +74,12 @@ struct ALXREyeInfo
     float ipd;
 };
 
+struct ALXRVersion {
+    unsigned int major;
+    unsigned int minor;
+    unsigned int patch;
+};
+
 struct ALXRRustCtx
 {
     void (*inputSend)(const TrackingInfo* data);
@@ -85,6 +91,7 @@ struct ALXRRustCtx
     void (*setWaitingNextIDR)(const bool);
     void (*requestIDR)();
 
+    ALXRVersion     firmwareVersion;
     ALXRGraphicsApi graphicsApi;
     ALXRDecoderType decoderType;
     ALXRColorSpace  displayColorSpace;
