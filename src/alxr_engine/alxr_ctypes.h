@@ -102,6 +102,8 @@ struct ALXRRustCtx
     bool noServerFramerateLock;
     bool noFrameSkip;
     bool disableLocalDimming;
+    bool headlessSession;
+
 #ifdef XR_USE_PLATFORM_ANDROID
     void* applicationVM;
     void* applicationActivity;

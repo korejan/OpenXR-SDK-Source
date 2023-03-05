@@ -115,11 +115,14 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
         options->NoServerFramerateLock = ctx.noServerFramerateLock;
         options->NoFrameSkip = ctx.noFrameSkip;
         options->DisableLocalDimming = ctx.disableLocalDimming;
+        options->HeadlessSession = ctx.headlessSession;
         options->DisplayColorSpace = static_cast<XrColorSpaceFB>(ctx.displayColorSpace);
         const auto& fmVersion = ctx.firmwareVersion;
         options->firmwareVersion = { fmVersion.major, fmVersion.minor, fmVersion.patch };
         if (options->GraphicsPlugin.empty())
             options->GraphicsPlugin = graphics_api_str(ctx.graphicsApi);
+        if (options->HeadlessSession)
+            options->GraphicsPlugin = "Headless";
 
         const auto platformData = std::make_shared<PlatformData>();
 #ifdef XR_USE_PLATFORM_ANDROID
@@ -244,17 +247,20 @@ void alxr_set_stream_config(const ALXRStreamConfig config)
         programPtr->CreateSwapchains(rc.eyeWidth, rc.eyeHeight);
     }
 
-    Log::Write(Log::Level::Info, "Starting decoder thread.");
-
     gLastEyeInfo = EyeInfoZero;
+
 #ifndef XR_DISABLE_DECODER_THREAD
-    const XrDecoderThread::StartCtx startCtx {
-        .decoderConfig = config.decoderConfig,
-        .programPtr = programPtr,
-        .rustCtx = gRustCtx
-    };
-    gDecoderThread.Start(startCtx);
-    Log::Write(Log::Level::Info, "Decoder Thread started.");
+    if (!programPtr->IsHeadlessSession()) {
+        Log::Write(Log::Level::Info, "Starting decoder thread.");
+
+        const XrDecoderThread::StartCtx startCtx{
+            .decoderConfig = config.decoderConfig,
+            .programPtr = programPtr,
+            .rustCtx = gRustCtx
+        };
+        gDecoderThread.Start(startCtx);
+        Log::Write(Log::Level::Info, "Decoder Thread started.");
+    }
 #endif
     // OpenXR does not have functions to query the battery levels of devices.
     const auto SendDummyBatteryLevels = []() {

@@ -126,6 +126,8 @@ struct IOpenXrProgram {
     virtual void Resume() = 0;
 
     virtual inline bool SetAndroidAppThread(const AndroidThreadType) { return false; }
+
+    virtual bool IsHeadlessSession() const = 0;
 };
 
 struct Swapchain {

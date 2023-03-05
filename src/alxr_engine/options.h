@@ -124,6 +124,7 @@ struct Options {
     bool NoServerFramerateLock = false;
     bool NoFrameSkip = false;
     bool DisableLocalDimming = false;
+    bool HeadlessSession = false;
 
     struct {
         XrFormFactor FormFactor{XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY};

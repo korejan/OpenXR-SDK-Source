@@ -355,8 +355,11 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
     {
         LogLayersAndExtensions();
+        
+        const bool headlessRequested = m_options && m_options->HeadlessSession;
         auto& graphicsApi = options->GraphicsPlugin;
-        if (graphicsApi.empty() || graphicsApi == "auto")
+        if (graphicsApi.empty() || graphicsApi == "auto" || 
+            (headlessRequested && !IsExtEnabled(XR_MND_HEADLESS_EXTENSION_NAME)))
         {
             Log::Write(Log::Level::Info, "Running auto graphics api selection.");
             constexpr const auto to_graphics_api_str = [](const ALXRGraphicsApi gapi) -> std::tuple<std::string_view, std::string_view>
@@ -382,7 +385,13 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
         m_graphicsPlugin = CreateGraphicsPlugin(options, platformPlugin);
-        Log::Write(Log::Level::Info, Fmt("Selected Graphics API: %s", graphicsApi.c_str()));
+        
+        if (headlessRequested && IsExtEnabled(XR_MND_HEADLESS_EXTENSION_NAME)) {
+            assert(graphicsApi == "Headless");
+            Log::Write(Log::Level::Info, "Headless session selected, no graphics API has been setup.");
+        } else {
+            Log::Write(Log::Level::Info, Fmt("Selected Graphics API: %s", graphicsApi.c_str()));
+        }
     }
 
     virtual ~OpenXrProgram() override {
@@ -542,6 +551,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         { XR_FB_FACE_TRACKING_EXTENSION_NAME, false },
         { XR_META_LOCAL_DIMMING_EXTENSION_NAME, false },
 #endif
+        { XR_MND_HEADLESS_EXTENSION_NAME, false },
 #ifdef XR_USE_OXR_PICO_V4
 #pragma message ("Pico 4.7.x OXR Extensions Enabled.")
         { XR_PICO_PERFORMANCE_SETTINGS_EXTENSION_NAME, false },
@@ -687,6 +697,10 @@ struct OpenXrProgram final : IOpenXrProgram {
             [](const std::string& ext) { return ext.c_str(); });
 
         for (const auto& [extName, extAvaileble] : m_availableSupportedExtMap) {
+            if (m_options && !m_options->HeadlessSession && extName == XR_MND_HEADLESS_EXTENSION_NAME) {
+                Log::Write(Log::Level::Info, Fmt("Headless-session option not set, %s will not be enabled."));
+                continue;
+            }
             if (extAvaileble) {
                 extensions.push_back(extName.data());
             }
@@ -1723,7 +1737,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         }
         CHECK(m_swapchainImages.empty());
         CHECK(m_swapchains.empty());
-        CHECK(m_configViews.empty());
+        //CHECK(m_configViews.empty());
 
         // Read graphics properties for preferred swapchain length and logging.
         XrSystemProperties systemProperties{
@@ -1770,6 +1784,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         // Create and cache view buffer for xrLocateViews later.
         m_views.resize(viewCount, IdentityView);
         if (viewCount < 2)
+            return;
+
+        if (IsHeadlessSession())
             return;
 
         // Create the swapchain and get the images.
@@ -2041,6 +2058,10 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     bool IsSessionRunning() const override { return m_sessionRunning; }
     bool IsSessionFocused() const override { return m_sessionState == XR_SESSION_STATE_FOCUSED; }
+
+    bool IsHeadlessSession() const override {
+        return m_options && m_options->HeadlessSession && IsExtEnabled(XR_MND_HEADLESS_EXTENSION_NAME);
+    }
 
     template < typename ControllerInfoArray >
     void PollHandTrackers(const XrTime time, ControllerInfoArray& controllerInfo)

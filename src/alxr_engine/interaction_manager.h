@@ -557,7 +557,7 @@ inline void InteractionManager::PollActions(InteractionManager::ControllerInfoLi
             .subactionPath = m_handSubactionPath[hand]
         };
         XrActionStatePose poseState{ .type = XR_TYPE_ACTION_STATE_POSE, .next = nullptr, .isActive = XR_FALSE };
-        CHECK_XRCMD(xrGetActionStatePose(m_session, &getInfo, &poseState));
+        xrGetActionStatePose(m_session, &getInfo, &poseState);
         m_handActive[hand] = poseState.isActive;
 
         auto& controllerInfo = controllerInfoList[hand];

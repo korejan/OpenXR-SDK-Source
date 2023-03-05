@@ -35,6 +35,10 @@ std::shared_ptr<IGraphicsPlugin> CreateGraphicsPlugin_D3D12(const std::shared_pt
                                                             std::shared_ptr<IPlatformPlugin> platformPlugin);
 #endif
 
+std::shared_ptr<IGraphicsPlugin> CreateGraphicsPlugin_Headless(const std::shared_ptr<Options>& options,
+                                                               std::shared_ptr<IPlatformPlugin> platformPlugin);
+
+
 namespace {
 using GraphicsPluginFactory = std::function<std::shared_ptr<IGraphicsPlugin>(const std::shared_ptr<Options>& options,
                                                                              std::shared_ptr<IPlatformPlugin> platformPlugin)>;
@@ -74,6 +78,10 @@ const std::map<std::string, GraphicsPluginFactory, IgnoreCaseStringLess> graphic
          return CreateGraphicsPlugin_D3D12(options, std::move(platformPlugin));
      }},
 #endif
+    {"Headless",
+     [](const std::shared_ptr<Options>& options, std::shared_ptr<IPlatformPlugin> platformPlugin) {
+         return CreateGraphicsPlugin_Headless(options, std::move(platformPlugin));
+     }},
 };
 }  // namespace
 
