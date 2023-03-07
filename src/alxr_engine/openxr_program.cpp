@@ -698,7 +698,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         for (const auto& [extName, extAvaileble] : m_availableSupportedExtMap) {
             if (m_options && !m_options->HeadlessSession && extName == XR_MND_HEADLESS_EXTENSION_NAME) {
-                Log::Write(Log::Level::Info, Fmt("Headless-session option not set, %s will not be enabled."));
+                Log::Write(Log::Level::Info, Fmt("Headless-session option not set, %s will not be enabled.", XR_MND_HEADLESS_EXTENSION_NAME));
                 continue;
             }
             if (extAvaileble) {
