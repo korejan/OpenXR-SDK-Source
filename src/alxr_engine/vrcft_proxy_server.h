@@ -53,6 +53,15 @@ namespace ALXR::VRCFT {
             return m_socket.send(asio::buffer(buffer)) == buffer.size();
         }
 
+        template < typename Tp >
+        inline bool send(const Tp& buffer)
+        {
+            return m_socket.send
+            (
+                asio::buffer(&buffer, sizeof(buffer))
+            ) == sizeof(buffer);
+        }
+
     private:
         tcp::socket m_socket;
     };
@@ -89,8 +98,8 @@ namespace ALXR::VRCFT {
         template < const std::size_t N >
         using Buffer = Session::Buffer<N>;
 
-        template < const std::size_t N >
-        inline bool Send(const Buffer<N>& buf) {
+        template < typename Tp >
+        inline bool Send(const Tp& buf) {
             if (!IsConnected())
                 return false;
             try {
