@@ -7,6 +7,7 @@ namespace ALXR::XRPaths {
 	constexpr inline const char* const UserHandRight    = "/user/hand/right";
 	constexpr inline const char* const UserHandLeftHTC  = "/user/hand_htc/left";
 	constexpr inline const char* const UserHandRightHTC = "/user/hand_htc/right";
+	constexpr inline const char* const UserEyesExt		= "/user/eyes_ext";
 
 	constexpr inline const char* const SelectClick = "select/click";
 	constexpr inline const char* const SelectValue = "select/value";
@@ -42,6 +43,7 @@ namespace ALXR::XRPaths {
 	constexpr inline const char* const TrackpadClick = "trackpad/click";
 	constexpr inline const char* const TrackpadTouch = "trackpad/touch";
 	constexpr inline const char* const TrackpadForce = "trackpad/force";
-  constexpr inline const char* const ShoulderClick = "shoulder/click";
+	constexpr inline const char* const ShoulderClick = "shoulder/click";
+	constexpr inline const char* const GazeExtPose = "gaze_ext/pose";
 }
 #endif

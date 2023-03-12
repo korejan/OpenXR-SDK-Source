@@ -13,6 +13,7 @@
 #include <string>
 #include <chrono>
 #include <functional>
+#include <optional>
 
 #include "pch.h"
 #include "common.h"
@@ -21,6 +22,7 @@
 #include "interaction_profiles.h"
 #include "timing.h"
 #include "ALVR-common/packet_types.h"
+#include "eye_gaze_interaction.h"
 
 namespace Side {
     constexpr const std::size_t LEFT = 0;
@@ -101,7 +103,13 @@ struct InteractionManager {
         const XrTime& time,
         const ALXR::SpaceLoc& initLoc = ALXR::IdentitySpaceLoc
     ) const;
-        
+
+    inline std::optional<XrSpaceLocation> GetEyeGazeSpaceLocation
+    (
+        const XrSpace& baseSpace,
+        const XrTime& time
+    ) const;
+
     void LogActions() const;
 
     using ControllerInfo     = ::TrackingInfo::Controller;
@@ -134,9 +142,14 @@ private:
     XrInstance m_instance { XR_NULL_HANDLE };
     XrSession  m_session  { XR_NULL_HANDLE };
     TogglePTModeFn m_togglePTMode{};
+
+    using EyeGazeInteractionPtr = std::unique_ptr<ALXR::EyeGazeInteraction>;
+    EyeGazeInteractionPtr m_eyeGazeInteraction { nullptr };
+
 #ifdef XR_USE_OXR_PICO_V4
     PFN_xrVibrateControllerPico m_pfnXrVibrateControllerPico { nullptr };
 #endif
+
 
     using InteractionProfilePtr = std::atomic<const InteractionProfile*>;
     InteractionProfilePtr m_activeProfile{ nullptr };
@@ -250,6 +263,8 @@ inline void InteractionManager::Clear() {
         m_handSpace[hand] = XR_NULL_HANDLE;
     }
 
+    m_eyeGazeInteraction.reset();
+
     if (m_actionSet != XR_NULL_HANDLE) {
         Log::Write(Log::Level::Verbose, "Destroying ActionSet");
         xrDestroyActionSet(m_actionSet);
@@ -328,6 +343,16 @@ inline ALXR::SpaceLoc InteractionManager::GetSpaceLocation
     assert(hand < Side::COUNT);
     assert(m_handSpace[hand] != XR_NULL_HANDLE);
     return ALXR::GetSpaceLocation(m_handSpace[hand], baseSpace, time, initLoc);
+}
+
+inline std::optional<XrSpaceLocation> InteractionManager::GetEyeGazeSpaceLocation
+(
+    const XrSpace& baseSpace,
+    const XrTime& time
+) const {
+    if (m_eyeGazeInteraction == nullptr)
+        return {};
+    return m_eyeGazeInteraction->GetSpaceLocation(baseSpace, time);
 }
 
 inline InteractionManager::SuggestedBindingList
@@ -518,6 +543,10 @@ inline void InteractionManager::InitializeActions(IsProfileSupportedFn&& isProfi
 
     InitSuggestedBindings(std::forward<IsProfileSupportedFn>(isProfileSupported));
 
+    if (isProfileSupported(ALXR::EyeGazeProfile)) {
+        m_eyeGazeInteraction = std::make_unique<ALXR::EyeGazeInteraction>(m_instance, m_session, m_actionSet);
+    }
+
     const XrSessionActionSetsAttachInfo attachInfo {
         .type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO,
         .next = nullptr,
@@ -546,6 +575,9 @@ inline void InteractionManager::PollActions(InteractionManager::ControllerInfoLi
         .activeActionSets = &activeActionSet
     };
     CHECK_XRCMD(xrSyncActions(m_session, &syncInfo));
+
+    if (m_eyeGazeInteraction)
+        m_eyeGazeInteraction->PollActions();
 
     const auto activeProfilePtr = m_activeProfile.load();
     for (const auto hand : { Side::LEFT, Side::RIGHT })
@@ -831,6 +863,7 @@ inline void InteractionManager::SetActiveProfile(const XrPath newProfilePath)
     );
     const auto* const newProfile = newProfileItr == ALXR::InteractionProfileMap.end() ?
         nullptr : &*newProfileItr;
+    assert(newProfile != &ALXR::EyeGazeProfile);
     m_activeProfile.store(newProfile);
 
     Log::Write(Log::Level::Info, "Interaction Profile Changed");

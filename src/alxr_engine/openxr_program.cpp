@@ -46,6 +46,7 @@
 #include "latency_manager.h"
 #include "interaction_profiles.h"
 #include "interaction_manager.h"
+#include "eye_gaze_interaction.h"
 
 #ifdef XR_USE_PLATFORM_ANDROID
 #ifndef ALXR_ENGINE_DISABLE_QUIT_ACTION
@@ -143,12 +144,12 @@ inline XrPosef RotateCCWAboutYAxis(float radians, XrVector3f translation) {
 }
 
 constexpr bool IsPoseValid(XrSpaceLocationFlags locationFlags) {
-    constexpr XrSpaceLocationFlags PoseValidFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    constexpr const XrSpaceLocationFlags PoseValidFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
     return (locationFlags & PoseValidFlags) == PoseValidFlags;
 }
 
 constexpr bool IsPoseTracked(XrSpaceLocationFlags locationFlags) {
-    constexpr XrSpaceLocationFlags PoseTrackedFlags =
+    constexpr const XrSpaceLocationFlags PoseTrackedFlags =
         XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
     return (locationFlags & PoseTrackedFlags) == PoseTrackedFlags;
 }
@@ -524,6 +525,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #endif
         { XR_EXT_PERFORMANCE_SETTINGS_EXTENSION_NAME, false },
         { XR_EXT_LOCAL_FLOOR_EXTENSION_NAME, false },
+        { XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME, false },
         { XR_MSFT_UNBOUNDED_REFERENCE_SPACE_EXTENSION_NAME, false },
 #ifndef XR_USE_OXR_OCULUS
         // Quest v46 firmware update added support for this extension which breaks the suggested grip button bindings for touch (pro) profiles...
@@ -999,6 +1001,9 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         const auto IsProfileSupported = [this](const auto& profile)
         {
+            if (&profile == &ALXR::EyeGazeProfile)
+                return IsExtEyeGazeInteractionSupported();
+
             if (m_options && m_options->DisableSuggestedBindings)
                 return false;
             if (IsRuntime(OxrRuntimeType::HTCWave)) {
@@ -1186,11 +1191,12 @@ struct OpenXrProgram final : IOpenXrProgram {
     PFN_xrDestroyEyeTrackerFB m_xrDestroyEyeTrackerFB_ = nullptr;
     PFN_xrGetEyeGazesFB m_xrGetEyeGazesFB_ = nullptr;
 
-    bool InitializeEyeTrackers()
+    bool InitializeFBEyeTrackers()
     {
         XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
-            .next = nullptr
+            .next = nullptr,
+            .supportsEyeTracking = XR_FALSE
         };
         XrSystemProperties systemProperties{
             .type = XR_TYPE_SYSTEM_PROPERTIES,
@@ -1233,9 +1239,37 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-    XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
-    PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
-    PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
+    bool IsExtEyeGazeInteractionSupported() const {
+        if (!IsExtEnabled(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)) {
+            return false;
+        }
+        XrSystemEyeGazeInteractionPropertiesEXT eyeTrackingSystemProperties{
+            .type = XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT,
+            .next = nullptr,
+            .supportsEyeGazeInteraction = XR_FALSE
+        };
+        XrSystemProperties systemProperties{
+            .type = XR_TYPE_SYSTEM_PROPERTIES,
+            .next = &eyeTrackingSystemProperties
+        };
+        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
+        return eyeTrackingSystemProperties.supportsEyeGazeInteraction == XR_TRUE;
+    }
+
+    bool InitExtEyeGazeInteraction() {        
+        if (!IsExtEyeGazeInteractionSupported()) {
+            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME));
+            return false;
+        }
+        Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME));
+        return true;
+    }
+
+    bool InitializeEyeTrackers() {
+        if (InitializeFBEyeTrackers())
+            return true;
+        return InitExtEyeGazeInteraction();
+    }
 
     std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
     bool m_sendVRCFTHandShakeMsg = true;
@@ -1254,6 +1288,11 @@ struct OpenXrProgram final : IOpenXrProgram {
         m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
         return true;
     }
+
+
+    XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
+    PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
+    PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
 
     bool InitializeFBFacialTracker()
     {
@@ -3062,9 +3101,6 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (ptime == 0 || m_vrcftProxyServer == nullptr)
             return;
 
-        newVRCFTPacket.expressionType = VRFCFTExpressionType::None;
-        newVRCFTPacket.eyeTrackerType = VRFCFTEyeType::None;
-
         for (const auto& [facialTracker, exprCount, offset] : {
                 std::make_tuple(m_facialTrackersHTC[0], XR_FACIAL_EXPRESSION_EYE_COUNT_HTC, 0),
                 std::make_tuple(m_facialTrackersHTC[1], XR_FACIAL_EXPRESSION_LIP_COUNT_HTC, XR_FACIAL_EXPRESSION_EYE_COUNT_HTC)
@@ -3104,6 +3140,19 @@ struct OpenXrProgram final : IOpenXrProgram {
             
             newVRCFTPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
             newVRCFTPacket.expressionType = VRFCFTExpressionType::FB;
+        }
+
+        if (const auto spaceLocOption = m_interactionManager->GetEyeGazeSpaceLocation(m_viewSpace, ptime)) {
+            const auto& spaceLoc = spaceLocOption.value();
+            if (Math::Pose::IsPoseValid(spaceLoc)) {
+
+                for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
+                    newVRCFTPacket.eyeGazePoses[idx] = spaceLoc.pose;
+                    newVRCFTPacket.isEyeGazePoseValid[idx] = XR_TRUE;
+                }
+                newVRCFTPacket.eyeTrackerType = VRFCFTEyeType::ExtEyeGazeInteraction;
+                newVRCFTPacket.isEyeFollowingBlendshapesValid = 0;
+            }
         }
 
         if (eyeTracker_ != XR_NULL_HANDLE) {
@@ -3337,7 +3386,8 @@ struct OpenXrProgram final : IOpenXrProgram {
     ALXR::ALXRPaths  m_alxrPaths;
     
     using InteractionManagerPtr = std::unique_ptr<ALXR::InteractionManager>;
-    InteractionManagerPtr m_interactionManager{ nullptr };
+    InteractionManagerPtr m_interactionManager{ nullptr };    
+    
     struct InputState
     {
         struct HandTrackerData
