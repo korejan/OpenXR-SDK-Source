@@ -54,12 +54,16 @@ struct InteractionProfile {
     const HandInputMap vector2fMap     = EmptyHandMap;
     const HandInputMap boolToScalarMap = EmptyHandMap;
     const HandInputMap scalarToBoolMap = EmptyHandMap;
+
     const char* const path;
     const char* const extensionName = nullptr;
     const char* const quitPath   = XRPaths::MenuClick;
     const char* const hapticPath = XRPaths::Haptic;
     const char* const posePath   = XRPaths::AimPose;
+    const char* const eyeGazePosePath = nullptr;
+        
     const HandPathList userHandPaths = UserHandPaths;
+    const char* const  userEyesPath = nullptr;
 
     // set button flags must refer to entries in InteractionProfile::boolMap.
     const OptionalPassthroughMode passthroughModes {};
@@ -69,6 +73,17 @@ struct InteractionProfile {
 };
 
 using namespace XRPaths;
+
+constexpr inline const InteractionProfile EyeGazeProfile{
+    .path = "/interaction_profiles/ext/eye_gaze_interaction",
+    .extensionName = XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME,
+    .quitPath = nullptr,
+    .hapticPath = nullptr,
+    .posePath = nullptr,
+    .eyeGazePosePath = ALXR::GazeExtPose,
+    .userEyesPath = ALXR::UserEyesExt
+};
+
 #ifdef XR_USE_OXR_PICO_V4
 constexpr inline const std::size_t ProfileMapSize = 1;
 #elif defined(XR_USE_OXR_OCULUS) || defined(XR_USE_OXR_PICO)
