@@ -113,9 +113,10 @@ typedef enum XrFaceExpressionFB {
 } XrFaceExpressionFB;
 
 typedef enum XrFaceExpressionSetFB {
-    XR_FACE_EXPRESSSION_SET_DEFAULT_FB = 0,
-    XR_FACE_EXPRESSSION_SET_MAX_ENUM_FB = 0x7FFFFFFF
+    XR_FACE_EXPRESSION_SET_DEFAULT_FB = 0,
+    XR_FACE_EXPRESSION_SET_MAX_ENUM_FB = 0x7FFFFFFF
 } XrFaceExpressionSetFB;
+#define XR_FACE_EXPRESSSION_SET_DEFAULT_FB XR_FACE_EXPRESSION_SET_DEFAULT_FB
 
 typedef enum XrFaceConfidenceFB {
     XR_FACE_CONFIDENCE_LOWER_FACE_FB = 0,
@@ -171,77 +172,6 @@ typedef XrResult(XRAPI_PTR* PFN_xrGetFaceExpressionWeightsFB)(
 
 #endif // XR_FB_face_tracking
 
-// ============================================================================
-// Begin Backwards Compatibility (DEPRECATED)
-// ============================================================================
-
-#ifndef XR_FBX_face_tracking
-#define XR_FBX_face_tracking 1
-
-#define XR_FBX1_face_tracking_SPEC_VERSION 1
-#define XR_FBX1_FACE_TRACKING_EXTENSION_NAME "XR_FBX1_face_tracking"
-#define XR_FBX2_face_tracking_SPEC_VERSION 2
-#define XR_FBX2_FACE_TRACKING_EXTENSION_NAME "XR_FBX2_face_tracking"
-
-XR_STRUCT_ENUM(XR_TYPE_FACE_TRACKER_CREATE_INFO_V1_FB, 1000201001);
-XR_STRUCT_ENUM(XR_TYPE_FACE_EXPRESSION_WEIGHTS_V1_FB, 1000201003);
-
-#define XR_TYPE_FACE_TRACKER_CREATE_INFO_V2_FB XR_TYPE_FACE_TRACKER_CREATE_INFO_FB
-#define XR_TYPE_FACE_EXPRESSION_WEIGHTS_V2_FB XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB
-
-typedef XrFlags64 XrFaceInputFlagsFB;
-
-typedef struct XrFaceTrackerCreateInfoV1FB {
-    XrStructureType type;
-    const void* XR_MAY_ALIAS next;
-    XrFaceInputFlagsFB flags;
-} XrFaceTrackerCreateInfoV1FB;
-
-typedef struct XrFaceExpressionWeightsV1FB {
-    XrStructureType type;
-    void* XR_MAY_ALIAS next;
-    uint32_t weightsCapacityInput;
-    uint32_t weightsCountOutput;
-    float* weights;
-    float* weightConfidences;
-} XrFaceExpressionWeightsV1FB;
-
-#define XrFaceTrackerCreateInfoV2FB XrFaceTrackerCreateInfoFB
-#define XrFaceExpressionWeightsV2FB XrFaceExpressionWeightsFB
-
-#ifndef XR_NO_PROTOTYPES
-#ifdef XR_EXTENSION_PROTOTYPES
-
-XRAPI_ATTR XrResult XRAPI_CALL xrCreateFaceTrackerV2FB(
-    XrSession session,
-    const XrFaceTrackerCreateInfoV2FB* createInfo,
-    XrFaceTrackerFB* faceTracker);
-
-XRAPI_ATTR XrResult XRAPI_CALL xrCreateFaceTrackerV1FB(
-    XrSession session,
-    const XrFaceTrackerCreateInfoV1FB* createInfo,
-    XrFaceTrackerFB* faceTracker);
-
-XRAPI_ATTR XrResult XRAPI_CALL xrDestroyFaceTrackerFB(XrFaceTrackerFB faceTracker);
-
-XRAPI_ATTR XrResult XRAPI_CALL xrGetFaceExpressionWeightsV2FB(
-    XrFaceTrackerFB faceTracker,
-    const XrFaceExpressionInfoFB* expressionInfo,
-    XrFaceExpressionWeightsV2FB* expressionWeights);
-
-XRAPI_ATTR XrResult XRAPI_CALL xrGetFaceExpressionWeightsV1FB(
-    XrFaceTrackerFB faceTracker,
-    const XrFaceExpressionInfoFB* expressionInfo,
-    XrFaceExpressionWeightsV1FB* expressionWeights);
-
-#endif /* XR_EXTENSION_PROTOTYPES */
-#endif /* !XR_NO_PROTOTYPES */
-
-#endif // XR_FBX_face_tracking
-
-// ============================================================================
-// End Backwards Compatibility (DEPRECATED)
-// ============================================================================
 
 #ifdef __cplusplus
 }

@@ -29,11 +29,23 @@ std::string uuidToHexString(const XrUuidEXT& uuid) {
 
 bool hexStringToUuid(const std::string& hex, XrUuidEXT& uuid) {
     if (hex.length() != XR_UUID_SIZE_EXT * 2) {
-      return false;
+        return false;
     }
     for (uint32_t i = 0, k = 0; i < XR_UUID_SIZE_EXT; i++, k+=2) {
-      std::string byteStr = hex.substr(k, 2);
-      uuid.data[i] = (uint8_t)stol(byteStr, nullptr, 16);
+        std::string byteStr = hex.substr(k, 2);
+        uuid.data[i] = (uint8_t)stol(byteStr, nullptr, 16);
     }
     return true;
+}
+
+bool isExtensionEnumerated(
+    const char* extensionName,
+    XrExtensionProperties enumeratedExtensions[],
+    uint32_t enumeratedExtensionCount) {
+    for (uint32_t i = 0; i < enumeratedExtensionCount; i++) {
+        if (strcmp(extensionName, enumeratedExtensions[i].extensionName) == 0) {
+            return true;
+        }
+    }
+    return false;
 }

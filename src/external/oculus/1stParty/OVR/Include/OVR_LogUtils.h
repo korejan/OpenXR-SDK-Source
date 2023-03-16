@@ -60,7 +60,7 @@ inline void LogWithTag(const int prio, const char* tag, const char* fmt, ...) {
     va_end(args);
 
     OutputDebugStringA(buffer);
-#elif defined(OVR_OS_LINUX) || defined(OVR_OS_MAC)
+#elif (defined(OVR_OS_LINUX) || defined(OVR_OS_MAC) || defined(OVR_OS_IPHONE))
     OVR_UNUSED(prio);
     OVR_UNUSED(tag);
     OVR_UNUSED(fmt);
@@ -166,7 +166,7 @@ inline void LogWithFileTag(const int prio, const char* fileTag, const char* fmt,
 
     OutputDebugStringA(buffer);
     OutputDebugStringA("\n");
-#elif defined(OVR_OS_LINUX) || defined(OVR_OS_MAC)
+#elif (defined(OVR_OS_LINUX) || defined(OVR_OS_MAC) || defined(OVR_OS_IPHONE))
     OVR_UNUSED(prio);
     OVR_UNUSED(fileTag);
     OVR_UNUSED(fmt);
@@ -262,7 +262,7 @@ inline void LogWithFileTag(const int prio, const char* fileTag, const char* fmt,
     }
 #endif
 
-#elif defined(OVR_OS_MAC) || defined(OVR_OS_LINUX)
+#elif (defined(OVR_OS_MAC) || defined(OVR_OS_LINUX) || defined(OVR_OS_IPHONE))
 #include <string>
 #include <folly/logging/xlog.h>
 
@@ -290,7 +290,7 @@ inline void LogWithFileTag(const int prio, const char* fileTag, const char* fmt,
     }
 
 #else
-#error "unknown platform"
+#error "unknown OVR_OS"
 #endif
 
 // logs only the first time to avoid spam

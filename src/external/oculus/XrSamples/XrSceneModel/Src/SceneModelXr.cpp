@@ -146,6 +146,11 @@ static const std::map<std::string, XrColor4f> SemanticLabelToColorMap = {
     {"WALL_FACE", {0.5f, 0.5f, 0.0f, 1.0f}},
     {"WINDOW_FRAME", {0.0f, 0.5f, 0.6f, 0.8f}},
     {"DOOR_FRAME", {0.0f, 0.2f, 0.2f, 1.0f}},
+    {"STORAGE", {0.5f, 0.1f, 0.4f, 0.6f}},
+    {"BED", {0.0f, 0.7f, 0.9f, 0.6f}},
+    {"SCREEN", {0.4f, 0.4f, 0.4f, 0.8f}},
+    {"LAMP", {0.9f, 0.9f, 0.9f, 0.8f}},
+    {"PLANT", {0.1f, 0.9f, 0.2f, 0.6f}},
     {"OTHER", {1.0f, 0.0f, 1.0f, 0.2f}}};
 
 XrColor4f GetColorForSemanticLabels(const std::string& labels) {
@@ -678,7 +683,7 @@ void ovrApp::CollectSpaceContainerUuids(XrSpace space, std::unordered_set<std::s
 
 std::string GetSemanticLabels(ovrApp& app, const XrSpace space) {
     static const std::string recognizedLabels =
-        "DESK,COUCH,FLOOR,CEILING,WALL_FACE,WINDOW_FRAME,DOOR_FRAME,OTHER";
+        "DESK,COUCH,FLOOR,CEILING,WALL_FACE,WINDOW_FRAME,DOOR_FRAME,STORAGE,BED,SCREEN,LAMP,PLANT,OTHER";
     const XrSemanticLabelsSupportInfoFB semanticLabelsSupportInfo = {
         XR_TYPE_SEMANTIC_LABELS_SUPPORT_INFO_FB,
         nullptr,

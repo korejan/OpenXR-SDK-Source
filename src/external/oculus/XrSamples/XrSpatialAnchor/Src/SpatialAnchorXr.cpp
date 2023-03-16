@@ -922,7 +922,9 @@ void ovrApp::HandleXrEvents() {
                                 for (std::size_t k = 0; k < ShareUserList.size(); k++) {
                                     XrSpaceUserFB user;
                                     XrSpaceUserCreateInfoFB createInfo = {
-                                        XR_TYPE_SPACE_USER_CREATE_INFO_FB, nullptr, ShareUserList[k]};
+                                        XR_TYPE_SPACE_USER_CREATE_INFO_FB,
+                                        nullptr,
+                                        ShareUserList[k]};
                                     OXR(FunPtrs.xrCreateSpaceUserFB(Session, &createInfo, &user));
                                     users.push_back(user);
                                 }
@@ -936,10 +938,12 @@ void ovrApp::HandleXrEvents() {
                                     users.data()};
                                 XrAsyncRequestIdFB shareRequestId;
                                 OXR(FunPtrs.xrShareSpacesFB(Session, &shareInfo, &shareRequestId));
-                                ShareSpacesEventMap[shareRequestId] = std::make_pair(spaceList, users);
+                                ShareSpacesEventMap[shareRequestId] =
+                                    std::make_pair(spaceList, users);
                             }
                         } else {
-                            ALOGW("xrPollEvent: Local multiplayer is not supported. Skipped sharing anchors.");
+                            ALOGW(
+                                "xrPollEvent: Local multiplayer is not supported. Skipped sharing anchors.");
                         }
                     }
                 }
@@ -1356,7 +1360,7 @@ int main() {
     }
 
     // Check that the extensions required are present.
-    const char* const requiredExtensionNames[] = {
+    std::vector<const char*> requiredExtensionNames {
 #if defined(XR_USE_GRAPHICS_API_OPENGL_ES)
         XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
 #elif defined(XR_USE_GRAPHICS_API_OPENGL)
@@ -1370,12 +1374,18 @@ int main() {
         XR_FB_SPATIAL_ENTITY_EXTENSION_NAME,
         XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME,
         XR_FB_SPATIAL_ENTITY_STORAGE_BATCH_EXTENSION_NAME,
+        XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME
+    };
+    const uint32_t numRequiredExtensions = requiredExtensionNames.size();
+
+    std::vector<const char*> localMultiplayerExtensionNames {
         XR_FB_SPATIAL_ENTITY_SHARING_EXTENSION_NAME,
-        XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME,
         XR_FB_SPATIAL_ENTITY_USER_EXTENSION_NAME
     };
-    const uint32_t numRequiredExtensions =
-        sizeof(requiredExtensionNames) / sizeof(requiredExtensionNames[0]);
+    const uint32_t numLocalMultiplayerExtensions = localMultiplayerExtensionNames.size();
+
+    std::vector<const char*> requestedExtensionNames(
+        requiredExtensionNames.begin(), requiredExtensionNames.end());
 
     // Check the list of required extensions against what is supported by the runtime.
     {
@@ -1412,17 +1422,30 @@ int main() {
         }
 
         for (uint32_t i = 0; i < numRequiredExtensions; i++) {
-            bool found = false;
-            for (uint32_t j = 0; j < numOutputExtensions; j++) {
-                if (!strcmp(requiredExtensionNames[i], extensionProperties[j].extensionName)) {
-                    ALOGV("Found required extension %s", requiredExtensionNames[i]);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!isExtensionEnumerated(
+                    requiredExtensionNames[i],
+                    extensionProperties,
+                    numOutputExtensions)) {
                 ALOGE("Failed to find required extension %s", requiredExtensionNames[i]);
                 exit(1);
+            } else {
+                ALOGV("Found required extension %s", requiredExtensionNames[i]);
+            }
+        }
+
+        app.IsLocalMultiplayerSupported = true;
+        for (uint32_t i = 0; i < numLocalMultiplayerExtensions; i++) {
+            if (!isExtensionEnumerated(
+                    localMultiplayerExtensionNames[i],
+                    extensionProperties,
+                    numOutputExtensions)) {
+                ALOGW(
+                    "Failed to find local multiplayer extension %s - feature is not supported on this device",
+                    localMultiplayerExtensionNames[i]);
+                app.IsLocalMultiplayerSupported = false;
+            } else {
+                ALOGV("Found local multiplayer extension %s", localMultiplayerExtensionNames[i]);
+                requestedExtensionNames.push_back(localMultiplayerExtensionNames[i]);
             }
         }
 
@@ -1444,8 +1467,8 @@ int main() {
     instanceCreateInfo.applicationInfo = appInfo;
     instanceCreateInfo.enabledApiLayerCount = 0;
     instanceCreateInfo.enabledApiLayerNames = NULL;
-    instanceCreateInfo.enabledExtensionCount = numRequiredExtensions;
-    instanceCreateInfo.enabledExtensionNames = requiredExtensionNames;
+    instanceCreateInfo.enabledExtensionCount = requestedExtensionNames.size();
+    instanceCreateInfo.enabledExtensionNames = requestedExtensionNames.data();
 
     XrResult initResult;
     OXR(initResult = xrCreateInstance(&instanceCreateInfo, &instance));

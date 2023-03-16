@@ -97,7 +97,7 @@ static inline XrVector3f XrQuaternionf_Rotate(const XrQuaternionf a, const XrVec
 }
 
 static inline XrQuaternionf XrQuaternionf_Normalize(const XrQuaternionf q) {
-    double n = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    float n = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
     if (n != 0.0f) {
         n = 1.0f / n;
     }

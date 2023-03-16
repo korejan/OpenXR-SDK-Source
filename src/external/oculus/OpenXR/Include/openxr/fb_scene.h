@@ -22,13 +22,8 @@ extern "C" {
 #ifndef XR_FB_scene
 #define XR_FB_scene 1
 
-
-#ifndef XR_FB_scene_EXPERIMENTAL_VERSION
 #define XR_FB_scene_SPEC_VERSION 1
 #define XR_FB_SCENE_EXTENSION_NAME "XR_FB_scene"
-#else
-#error "unknown experimental version number for XR_FB_scene_EXPERIMENTAL_VERSION"
-#endif
 
 static const XrSpaceComponentTypeFB XR_SPACE_COMPONENT_TYPE_BOUNDED_2D_FB =
     (XrSpaceComponentTypeFB)3;

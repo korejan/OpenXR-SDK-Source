@@ -86,76 +86,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetDeviceSampleRateFB(
 
 #endif // XR_FB_haptic_pcm
 
-// ============================================================================
-// Begin Backwards Compatibility (DEPRECATED)
-// ============================================================================
 
-#ifndef XR_FBX_haptic_pcm
-#define XR_FBX_haptic_pcm 1
-#define XR_FBX1_haptic_pcm_SPEC_VERSION 1
-#define XR_FBX1_HAPTIC_PCM_EXTENSION_NAME "XR_FBX1_haptic_pcm"
-
-#ifdef XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
-#if XR_FB_haptic_pcm_EXPERIMENTAL_VERSION == 1
-#undef XR_FB_haptic_pcm_SPEC_VERSION
-#undef XR_FB_HAPTIC_PCM_EXTENSION_NAME
-#define XR_FB_haptic_pcm_SPEC_VERSION XR_FBX1_haptic_pcm_SPEC_VERSION
-#define XR_FB_HAPTIC_PCM_EXTENSION_NAME XR_FBX1_HAPTIC_PCM_EXTENSION_NAME
-#else
-#error "unknown experimental version for XR_FB_haptic_pcm"
-#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
-#endif
-#ifdef XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
-
-#if XR_FB_haptic_pcm_EXPERIMENTAL_VERSION >= 1
-
-XR_STRUCT_ENUM(XR_TYPE_HAPTIC_PCM_VIBRATION_FBX1, 1000209001);
-/// This struct provides a high fidelity control over the haptics effect
-/// If triggered on localized haptics (trigger/thumb), this will throw an
-/// XR_ERROR_FEATURE_UNSUPPORTED
-typedef struct XrHapticPcmVibrationFBX1 {
-    XrStructureType type;
-    const void* XR_MAY_ALIAS next;
-    /// the samples that the developer provides, expectation is that these samples are points on a
-    /// sine curve
-    const float* buffer;
-    /// number of samples
-    uint32_t bufferSize;
-    /// number of samples to be playes per second, this is used to determine the duration of the
-    /// effect
-    float sampleRate;
-    /// if set to true, any existing samples will be cleared and a new haptic effect will begin, if
-    /// false, samples will be appended to the currently playing effect
-    XrBool32 clear;
-    /// pointer to an unsigned integer, which contains the number of samples that were consumed from
-    /// the input
-    uint32_t* bufferCountOutput;
-} XrHapticPcmVibrationFBX1;
-
-typedef XrResult(XRAPI_PTR* PFN_xrGetDevicePCMSampleRateFBX1)(
-    XrSession session,
-    XrDevicePcmSampleRateGetInfoFB* deviceSampleRate);
-
-#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION >= 1
-
-#if XR_FB_haptic_pcm_EXPERIMENTAL_VERSION == 1
-
-#ifndef XR_NO_PROTOTYPES
-#ifdef XR_EXTENSION_PROTOTYPES
-
-XRAPI_ATTR XrResult XRAPI_CALL
-xrGetDevicePCMSampleRateFB(XrSession session, XrDevicePcmSampleRateGetInfoFB* deviceSampleRate);
-
-#endif // XR_EXTENSION_PROTOTYPES
-#endif // !XR_NO_PROTOTYPES
-
-#define PFN_xrGetDevicePCMSampleRateFB PFN_xrGetDevicePCMSampleRateFBX1
-
-#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION == 1
-
-#endif // XR_FB_haptic_pcm_EXPERIMENTAL_VERSION
-
-#endif // XR_FBX_haptic_pcm
 #ifdef __cplusplus
 }
 #endif

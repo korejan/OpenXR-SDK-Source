@@ -351,29 +351,44 @@ class XrBodyFaceEyeSocialApp : public OVRFW::XrApp {
             axisRenderer_.Update(bodyJoints);
         }
 
+        /// Head position
+        XrSpaceLocation viewLocation{XR_TYPE_SPACE_LOCATION};
+        OXR(xrLocateSpace(HeadSpace, bodySpace, ToXrTime(in.PredictedDisplayTime), &viewLocation));
+
         /// Eyes
         if (eyeTracker_ != XR_NULL_HANDLE) {
-            XrEyeGazesFB eyeGazes{XR_TYPE_EYE_GAZES_FB};
+            if ((viewLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+                (viewLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+                // NOTE:
+                // The returned eye poses (position and rotation) in `XrEyeGazesFB` struct may be
+                // from an older timestamp than the `time` requested in the `XrEyeGazesInfoFB` or
+                // the latest head/body pose. We can see the timestamp of the (output) eye poses
+                // in the (output) `time` field of the `XrEyeGazesFB` struct.
+                //
+                // The simpliest way of synchronising the eye positions with the head/body poses
+                // (and therefore avoiding jitter in the eye poses during head/body movements) is
+                // to request (the eye) poses in the head (VIEW) space and transform the result
+                // to the head/body space later.
+                OVR::Posef headPose = FromXrPosef(viewLocation.pose);
 
-            XrEyeGazesInfoFB gazesInfo{XR_TYPE_EYE_GAZES_INFO_FB};
-            gazesInfo.baseSpace = bodySpace;
-            gazesInfo.time = ToXrTime(in.PredictedDisplayTime);
+                XrEyeGazesFB eyeGazes{XR_TYPE_EYE_GAZES_FB};
 
-            OXR(xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes));
+                XrEyeGazesInfoFB gazesInfo{XR_TYPE_EYE_GAZES_INFO_FB};
+                gazesInfo.baseSpace = HeadSpace;
+                gazesInfo.time = ToXrTime(in.PredictedDisplayTime);
 
-            static_assert(std::size(eyeGazes.gaze) == 2);
-            for (size_t eye = 0; eye < std::size(eyeGazes.gaze); ++eye) {
-                const OVR::Posef pose = FromXrPosef(eyeGazes.gaze[eye].gazePose);
-                OVRFW::GeometryRenderer& gr = eyeRenderers[eye];
-                gr.SetScale({1, 1, 1});
-                gr.SetPose(pose);
-                gr.Update();
+                OXR(xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes));
+
+                static_assert(std::size(eyeGazes.gaze) == 2);
+                for (size_t eye = 0; eye < std::size(eyeGazes.gaze); ++eye) {
+                    const OVR::Posef pose = headPose * FromXrPosef(eyeGazes.gaze[eye].gazePose);
+                    OVRFW::GeometryRenderer& gr = eyeRenderers[eye];
+                    gr.SetScale({1, 1, 1});
+                    gr.SetPose(pose);
+                    gr.Update();
+                }
             }
         }
-
-        XrSpaceLocation viewLocation{XR_TYPE_SPACE_LOCATION};
-        /// Head position
-        OXR(xrLocateSpace(HeadSpace, bodySpace, ToXrTime(in.PredictedDisplayTime), &viewLocation));
 
         auto simpleExpression =
             [](const XrFaceExpressionWeightsFB& expressionWeights) -> EmojiExpression {

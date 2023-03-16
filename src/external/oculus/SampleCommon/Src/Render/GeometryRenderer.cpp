@@ -165,6 +165,7 @@ void GeometryRenderer::Shutdown() {
 }
 
 void GeometryRenderer::Update() {
+    ModelPose_.Rotation.Normalize();
     ModelMatrix_ = OVR::Matrix4f(ModelPose_) * OVR::Matrix4f::Scaling(ModelScale_);
 }
 
