@@ -35,6 +35,8 @@ DLLEXPORT void alxr_on_resume();
 DLLEXPORT void alxr_on_video_packet(const VideoFrame* header, const unsigned char* packet, unsigned int packetSize);
 DLLEXPORT void alxr_on_time_sync(const TimeSync* packet);
 
+DLLEXPORT void alxr_set_log_custom_output(ALXRLogOptions options, ALXRLogOutputFn outputFn);
+
 #ifdef __cplusplus
 }
 #endif

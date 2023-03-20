@@ -5,6 +5,10 @@
 #include "pch.h"
 #include "logger.h"
 
+#include <atomic>
+#include <cassert>
+#include <array>
+#include <string_view>
 #include <sstream>
 
 #if defined(ANDROID)
@@ -12,9 +16,30 @@
 #define ALOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, "alxr-client", __VA_ARGS__)
 #endif
 
-namespace {
+namespace {;
+
+inline void defaultOuput(Log::Level severity, const char* output, unsigned int len) {
+    assert(output != nullptr);
+    
+    const std::string_view out{ output, len };
+
+    ((severity == Log::Level::Error) ? std::clog : std::cout) << out;
+#if defined(_WIN32)
+    OutputDebugStringA(output);
+#endif
+#if defined(ANDROID)
+    if (severity == Level::Error)
+        ALOGE("%s", out.str().c_str());
+    else
+        ALOGV("%s", out.str().c_str());
+#endif
+}
+
+std::atomic<Log::OutputFn> g_outputFn{ defaultOuput };
+std::atomic<unsigned int>  g_logOptions { Log::LogOptions::Timestamp | Log::LogOptions::LevelTag };
 Log::Level g_minSeverity{Log::Level::Info};
 std::mutex g_logLock;
+
 }  // namespace
 
 namespace Log {
@@ -37,25 +62,43 @@ void Write(Level severity, const std::string& msg) {
     const auto secondRemainder = now - std::chrono::system_clock::from_time_t(now_time);
     const int64_t milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(secondRemainder).count();
 
-    static std::map<Level, const char*> severityName = {
-        {Level::Verbose, "Verbose"}, {Level::Info, "Info   "}, {Level::Warning, "Warning"}, {Level::Error, "Error  "}};
+    // { Verbose, Info, Warning, Error };
+    static constexpr const std::array<std::string_view, 4> severityName {
+        "Verbose", "Info", "Warning", "Error"
+    };
+
+    const auto logOpts = g_logOptions.load();
+    const auto outputFn = g_outputFn.load();
+    assert(outputFn != nullptr);
+
+    if (logOpts == 0) {
+        std::scoped_lock<std::mutex> lock(g_logLock);  // Ensure output is serialized    
+        outputFn(severity, msg.c_str(), static_cast<unsigned int>(msg.length()));
+        return;
+    }
 
     std::ostringstream out;
     out.fill('0');
-    out << "[" << std::setw(2) << now_tm.tm_hour << ":" << std::setw(2) << now_tm.tm_min << ":" << std::setw(2) << now_tm.tm_sec
-        << "." << std::setw(3) << milliseconds << "]"
-        << "[" << severityName[severity] << "] " << msg << std::endl;
+    if ((logOpts & LogOptions::Timestamp) != 0) {
+        out << "[" << std::setw(2) << now_tm.tm_hour << ":" << std::setw(2) << now_tm.tm_min << ":" << std::setw(2) << now_tm.tm_sec
+            << "." << std::setw(3) << milliseconds << "]";
+    }
+    if ((logOpts & LogOptions::LevelTag) != 0) {
+        out << "[" << severityName[static_cast<std::size_t>(severity)] << "] ";
+    }
+    out << msg << std::endl;
 
-    std::lock_guard<std::mutex> lock(g_logLock);  // Ensure output is serialized
-    ((severity == Level::Error) ? std::clog : std::cout) << out.str();
-#if defined(_WIN32)
-    OutputDebugStringA(out.str().c_str());
-#endif
-#if defined(ANDROID)
-    if (severity == Level::Error)
-        ALOGE("%s", out.str().c_str());
-    else
-        ALOGV("%s", out.str().c_str());
-#endif
+    std::scoped_lock<std::mutex> lock(g_logLock);  // Ensure output is serialized    
+    const auto& result = out.str();
+    outputFn(severity, result.c_str(), static_cast<unsigned int>(result.length()));
 }
+
+void SetLogCustomOutput(const LogOptions options, OutputFn outputFn) {
+    g_logOptions = options;
+    if (outputFn == nullptr)
+        outputFn = defaultOuput;
+    assert(outputFn != nullptr);
+    g_outputFn.store(outputFn);
+}
+
 }  // namespace Log
