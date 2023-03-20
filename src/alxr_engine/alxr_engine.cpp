@@ -14,6 +14,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <type_traits>
 #include <memory>
 #include <mutex>
 
@@ -417,4 +418,17 @@ void alxr_on_time_sync(const TimeSync* packet) {
         assert(packet != nullptr);
         LatencyManager::Instance().OnTimeSyncRecieved(*packet);
     }
+}
+
+void alxr_set_log_custom_output(ALXRLogOptions options, ALXRLogOutputFn outputFn) {
+    static_assert(
+        std::is_same<
+            std::underlying_type<ALXRLogLevel>::type,
+            std::underlying_type<Log::Level>::type
+        >::value
+    );
+    Log::SetLogCustomOutput(
+        static_cast<Log::LogOptions>(options),
+        reinterpret_cast<Log::OutputFn>(outputFn)
+    );
 }

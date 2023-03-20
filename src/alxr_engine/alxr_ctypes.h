@@ -145,6 +145,14 @@ struct ALXRStreamConfig {
     ALXRDecoderConfig   decoderConfig;
 };
 
+enum ALXRLogOptions : unsigned int {
+    ALXR_LOG_OPTION_NONE = 0,
+    ALXR_LOG_OPTION_TIMESTAMP = (1u << 0),
+    ALXR_LOG_OPTION_LEVEL_TAG = (1u << 1)
+};
+enum ALXRLogLevel : unsigned int { Verbose, Info, Warning, Error };
+typedef void (*ALXRLogOutputFn)(ALXRLogLevel level, const char* output, unsigned int len);
+
 #ifdef __cplusplus
 }
 #endif
