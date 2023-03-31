@@ -28,10 +28,10 @@ inline void defaultOuput(Log::Level severity, const char* output, unsigned int l
     OutputDebugStringA(output);
 #endif
 #if defined(ANDROID)
-    if (severity == Level::Error)
-        ALOGE("%s", out.str().c_str());
+    if (severity == Log::Level::Error)
+        ALOGE("%s", output);
     else
-        ALOGV("%s", out.str().c_str());
+        ALOGV("%s", output);
 #endif
 }
 
