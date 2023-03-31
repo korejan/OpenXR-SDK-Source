@@ -118,7 +118,7 @@ struct Options {
 
     FirmwareVersion firmwareVersion{};
 
-    XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_REC2020_FB;
+    XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_QUEST_FB;
     bool DisableLinearizeSrgb=false;
     bool DisableSuggestedBindings = false;
     bool NoServerFramerateLock = false;

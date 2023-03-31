@@ -1163,7 +1163,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         //CHECK_XRCMD(m_pfnEnumerateColorSpacesFB(m_session, colorSpaceCount, &colorSpaceCount, colorSpaceTypes.data()));
 
         const XrColorSpaceFB selectedColorSpace = m_options ?
-            m_options->DisplayColorSpace : XR_COLOR_SPACE_REC2020_FB;
+            m_options->DisplayColorSpace : static_cast<XrColorSpaceFB>(ALXRColorSpace::Default);
         const auto colorSpaceName = to_string(selectedColorSpace);
 
         if (m_pfnSetColorSpaceFB(m_session, selectedColorSpace) != XR_SUCCESS) {

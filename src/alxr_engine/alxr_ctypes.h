@@ -55,6 +55,7 @@ enum ALXRColorSpace {
     Quest = 5,
     P3 = 6,
     AdobeRgb = 7,
+    Default = Quest,
     MaxEnum = 0x7fffffff
 };
 
