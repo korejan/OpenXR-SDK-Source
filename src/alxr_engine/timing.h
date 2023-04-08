@@ -34,11 +34,25 @@ inline std::uint64_t GetTimestampUs()
     return duration_cast<microsecondsU64>(ClockType::now().time_since_epoch()).count();
 }
 
+template < typename ClockType >
+inline std::uint64_t GetTimestampMs()
+{
+    using namespace std::chrono;
+    using millisecondsU64 = duration<std::uint64_t, milliseconds::period>;
+    return duration_cast<millisecondsU64>(ClockType::now().time_since_epoch()).count();
+}
+
 // monotonic clock.
 inline std::uint64_t GetSteadyTimestampUs()
 {
     static_assert(XrSteadyClock::is_steady);
     return GetTimestampUs<XrSteadyClock>();
+}
+
+inline std::uint64_t GetSteadyTimestampMs()
+{
+    static_assert(XrSteadyClock::is_steady);
+    return GetTimestampMs<XrSteadyClock>();
 }
 
 inline std::uint64_t GetSystemTimestampUs()

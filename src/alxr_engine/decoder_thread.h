@@ -48,5 +48,8 @@ public:
 	void Start(const StartCtx& ctx);
 	void Stop();
 	bool QueuePacket(const VideoFrame& header, const std::size_t packetSize);
+
+	using VideoPacket = FECQueue::VideoPacket;
+	bool QueuePacket(const VideoFrame& header, const VideoPacket& packet);
 };
 #endif

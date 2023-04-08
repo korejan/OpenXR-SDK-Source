@@ -32,10 +32,11 @@ void LatencyManager::OnPreVideoPacketRecieved(const VideoFrame& header)
 {
     if (m_rt_state.lastFrameIndex != header.trackingFrameIndex) {
         LatencyCollector::Instance().receivedFirst(header.trackingFrameIndex);
-        const auto diff = static_cast<std::int64_t>(header.sentTime) - m_rt_state.timeDiff;
+        const std::int64_t timeDiff = m_rt_state.timeDiff.load();
+        const auto diff = static_cast<std::int64_t>(header.sentTime) - timeDiff;
         const auto timeStamp = static_cast<std::int64_t>(GetSystemTimestampUs());
         const auto offset = diff > timeStamp ?
-            0 : ((std::int64_t)header.sentTime - m_rt_state.timeDiff - timeStamp);
+            0 : ((std::int64_t)header.sentTime - timeDiff - timeStamp);
         LatencyCollector::Instance().estimatedSent(header.trackingFrameIndex, offset);
         m_rt_state.lastFrameIndex = header.trackingFrameIndex;
     }

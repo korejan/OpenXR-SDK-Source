@@ -32,6 +32,8 @@ DLLEXPORT void alxr_on_haptics_feedback(unsigned long long path, float duration_
 DLLEXPORT void alxr_on_server_disconnect();
 DLLEXPORT void alxr_on_pause();
 DLLEXPORT void alxr_on_resume();
+DLLEXPORT void alxr_on_video_packet(const VideoFrame* header, const unsigned char* packet, unsigned int packetSize);
+DLLEXPORT void alxr_on_time_sync(const TimeSync* packet);
 
 #ifdef __cplusplus
 }

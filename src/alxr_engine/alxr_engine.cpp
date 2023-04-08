@@ -393,3 +393,28 @@ void alxr_on_haptics_feedback(unsigned long long path, float duration_s, float f
         });
     }
 }
+
+DLLEXPORT void alxr_on_video_packet(const VideoFrame* headerPtr, const unsigned char* packet, unsigned int packetSize)
+{
+#ifdef XR_DISABLE_DECODER_THREAD
+    (void)headerPtr;
+    (void)packet;
+    (void)packetSize;
+#else
+    if (const auto programPtr = gProgram) {
+        assert(headerPtr != nullptr);
+        const auto& header = *headerPtr;
+        gDecoderThread.QueuePacket(header, XrDecoderThread::VideoPacket{
+            packet,
+            static_cast<std::size_t>(packetSize)
+        });
+    }
+#endif
+}
+
+void alxr_on_time_sync(const TimeSync* packet) {
+    if (const auto programPtr = gProgram) {
+        assert(packet != nullptr);
+        LatencyManager::Instance().OnTimeSyncRecieved(*packet);
+    }
+}

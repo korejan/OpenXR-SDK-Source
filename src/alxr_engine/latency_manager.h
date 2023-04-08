@@ -81,7 +81,7 @@ private:
 	std::uint64_t m_timeSyncSequence = uint64_t(-1);
 	struct RecieveThreadState
 	{
-		std::int64_t  timeDiff = 0;
+		std::atomic<std::int64_t>  timeDiff{ 0 };
 		std::uint64_t lastFrameIndex = 0;
 		std::uint32_t prevVideoSequence = 0;
 		std::atomic<bool> isFecFailed{ false };

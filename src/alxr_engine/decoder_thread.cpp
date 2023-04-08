@@ -3,7 +3,7 @@
 #include "decoderplugin.h"
 #include "latency_manager.h"
 
-bool XrDecoderThread::QueuePacket(const VideoFrame& header, const std::size_t packetSize)
+bool XrDecoderThread::QueuePacket(const VideoFrame& header, const XrDecoderThread::VideoPacket& packet)
 {
 	const auto decoderPlugin = m_decoderPlugin;
 	if (decoderPlugin == nullptr)
@@ -12,7 +12,7 @@ bool XrDecoderThread::QueuePacket(const VideoFrame& header, const std::size_t pa
 
 	bool fecFailure = false, isComplete = true;
 	if (const auto fecQueue = m_fecQueue) {
-		fecQueue->addVideoPacket(&header, static_cast<int>(packetSize), fecFailure);
+		fecQueue->addVideoPacket(header, packet, fecFailure);
 		if (isComplete = fecQueue->reconstruct()) {
 			const size_t frameBufferSize = fecQueue->getFrameByteSize();
 			const auto frameBufferPtr = reinterpret_cast<const std::uint8_t*>(fecQueue->getFrameBuffer());
@@ -20,13 +20,19 @@ bool XrDecoderThread::QueuePacket(const VideoFrame& header, const std::size_t pa
 			fecQueue->clearFecFailure();
 		}
 	} else { // then FEC is disabled
-		const size_t frameBufferSize = packetSize - sizeof(VideoFrame);
-		const auto frameBufferPtr = reinterpret_cast<const std::uint8_t*>(&header) + sizeof(VideoFrame);
-		decoderPlugin->QueuePacket({ frameBufferPtr, frameBufferSize }, header.trackingFrameIndex);
+		decoderPlugin->QueuePacket(packet, header.trackingFrameIndex);
 	}
 
 	LatencyManager::Instance().OnPostVideoPacketRecieved(header, { isComplete, fecFailure });
 	return true;
+}
+
+bool XrDecoderThread::QueuePacket(const VideoFrame& header, const std::size_t packetSize)
+{
+	assert(packetSize >= sizeof(VideoFrame));
+	const size_t frameBufferSize = packetSize - sizeof(VideoFrame);
+	const auto frameBufferPtr = reinterpret_cast<const std::uint8_t*>(&header) + sizeof(VideoFrame);
+	return QueuePacket(header, { frameBufferPtr, frameBufferSize });
 }
 
 void XrDecoderThread::Stop()
