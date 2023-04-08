@@ -394,7 +394,7 @@ void alxr_on_haptics_feedback(unsigned long long path, float duration_s, float f
     }
 }
 
-DLLEXPORT void alxr_on_video_packet(const VideoFrame* headerPtr, const unsigned char* packet, unsigned int packetSize)
+void alxr_on_video_packet(const VideoFrame* headerPtr, const unsigned char* packet, unsigned int packetSize)
 {
 #ifdef XR_DISABLE_DECODER_THREAD
     (void)headerPtr;
