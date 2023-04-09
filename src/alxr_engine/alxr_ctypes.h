@@ -32,6 +32,23 @@ enum ALXRDecoderType
     CPU
 };
 
+enum class ALXRFacialExpressionType : unsigned char {
+    None = 0, // Not Support or Disabled
+    FB,
+    HTC,
+    Pico,
+    Auto,
+    TypeCount
+};
+
+enum class ALXREyeTrackingType : unsigned char {
+    None = 0, // Not Support or Disabled
+    FBEyeTrackingSocial,
+    ExtEyeGazeInteraction,
+    Auto,
+    TypeCount
+};
+
 enum ALXRTrackingSpace
 {
     LocalRefSpace,
@@ -97,6 +114,9 @@ struct ALXRRustCtx
     ALXRDecoderType decoderType;
     ALXRColorSpace  displayColorSpace;
 
+    ALXRFacialExpressionType facialTracking;
+    ALXREyeTrackingType eyeTracking;
+
     bool verbose;
     bool disableLinearizeSrgb;
     bool noSuggestedBindings;
@@ -104,6 +124,9 @@ struct ALXRRustCtx
     bool noFrameSkip;
     bool disableLocalDimming;
     bool headlessSession;
+    bool noFTServer;
+    bool noPassthrough;
+    bool noHandTracking;
 
 #ifdef XR_USE_PLATFORM_ANDROID
     void* applicationVM;
