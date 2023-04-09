@@ -41,6 +41,7 @@
 #include "concurrent_queue.h"
 //#include "alxr_engine.h"
 #include "alxr_ctypes.h"
+#include "alxr_facial_eye_tracking_packet.h"
 #include "ALVR-common/packet_types.h"
 #include "timing.h"
 #include "latency_manager.h"
@@ -396,9 +397,9 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     virtual ~OpenXrProgram() override {
         Log::Write(Log::Level::Verbose, "Destroying OpenXrProgram");
-                
+        
         if (IsSessionRunning()) {
-            CHECK_XRCMD(xrEndSession(m_session));
+            xrEndSession(m_session);
             m_sessionRunning.store(false);
         }
 
@@ -699,17 +700,31 @@ struct OpenXrProgram final : IOpenXrProgram {
         std::transform(graphicsExtensions.begin(), graphicsExtensions.end(), std::back_inserter(extensions),
             [](const std::string& ext) { return ext.c_str(); });
 
+        using ExcludeMap = std::unordered_map<std::string_view, bool>;
+        const auto exclusionMap = [this]() -> ExcludeMap {
+            if (m_options == nullptr)
+                return {};
+            return {
+                { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        IsPrePicoPUI<5,7>() },
+                { XR_MND_HEADLESS_EXTENSION_NAME,             !m_options->HeadlessSession },
+                { XR_FB_PASSTHROUGH_EXTENSION_NAME,           m_options->NoPassthrough },
+                { XR_HTC_PASSTHROUGH_EXTENSION_NAME,          m_options->NoPassthrough },
+                { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        m_options->NoHandTracking },
+                { XR_HTC_FACIAL_TRACKING_EXTENSION_NAME,      !m_options->IsSelected(ALXRFacialExpressionType::HTC) },
+                { XR_FB_FACE_TRACKING_EXTENSION_NAME,         !m_options->IsSelected(ALXRFacialExpressionType::FB) },
+                { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME,   !m_options->IsSelected(ALXREyeTrackingType::FBEyeTrackingSocial) },
+                { XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME, !m_options->IsSelected(ALXREyeTrackingType::ExtEyeGazeInteraction) },
+            };
+        }();
+        const auto IsExcluded = [&exclusionMap](const std::string_view& extName) {
+            const auto excludeItr = exclusionMap.find(extName);
+            return excludeItr != exclusionMap.end() && excludeItr->second;
+        };
+        Log::Write(Log::Level::Warning, "Excluded Extensions (user specified):");
         for (const auto& [extName, extAvaileble] : m_availableSupportedExtMap) {
-            if (IsPrePicoPUI<5,7>() && extName == XR_EXT_HAND_TRACKING_EXTENSION_NAME) {
-                // Pico's implementation of XR_EXT_hand_tracking pre-PUI 5.6/7 has bugs:
-                //  * Behaves incorrect with stage reference spaces.
-                //  * Missing joints.
-                //  * Joint pose orienations are incorrect and/or in a wrong space.
-                Log::Write(Log::Level::Info, Fmt("Hand-tracking is non-functional in PUI versions below 5.6, %s will not be enabled.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
-                continue;
-            }
-            if (m_options && !m_options->HeadlessSession && extName == XR_MND_HEADLESS_EXTENSION_NAME) {
-                Log::Write(Log::Level::Info, Fmt("Headless-session option not set, %s will not be enabled.", XR_MND_HEADLESS_EXTENSION_NAME));
+            if (IsExcluded(extName)) {
+                const std::string name{ extName };
+                Log::Write(Log::Level::Warning, Fmt("\t%s", name.c_str()));
                 continue;
             }
             if (extAvaileble) {
@@ -719,7 +734,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         Log::Write(Log::Level::Info, "Selected extensions to enable:");
         for (const auto& extName : extensions) {
-            Log::Write(Log::Level::Info, Fmt("\t%s", extName));
+            const std::string name{ extName };
+            Log::Write(Log::Level::Info, Fmt("\t%s", name.c_str()));
         }
 
         XrInstanceCreateInfo createInfo {
@@ -1193,6 +1209,12 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     bool InitializeFBEyeTrackers()
     {
+        if (!IsExtEnabled(XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME) ||
+            (m_options && !m_options->IsSelected(ALXREyeTrackingType::FBEyeTrackingSocial))) {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            return false;
+        }
+
         XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
             .next = nullptr,
@@ -1204,7 +1226,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (!eyeTrackingSystemProperties.supportsEyeTracking) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
             return false;
         }
 
@@ -1223,7 +1245,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_xrCreateEyeTrackerFB_ == nullptr ||
             m_xrDestroyEyeTrackerFB_ == nullptr ||
             m_xrGetEyeGazesFB_ == nullptr) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
             return false;
         }
 
@@ -1240,7 +1262,9 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     bool IsExtEyeGazeInteractionSupported() const {
-        if (!IsExtEnabled(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)) {
+        if (!IsExtEnabled(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME) ||
+            (m_options && !m_options->IsSelected(ALXREyeTrackingType::ExtEyeGazeInteraction)))
+        {
             return false;
         }
         XrSystemEyeGazeInteractionPropertiesEXT eyeTrackingSystemProperties{
@@ -1258,7 +1282,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     bool InitExtEyeGazeInteraction() {        
         if (!IsExtEyeGazeInteractionSupported()) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME));
             return false;
         }
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME));
@@ -1271,22 +1295,10 @@ struct OpenXrProgram final : IOpenXrProgram {
         return InitExtEyeGazeInteraction();
     }
 
-    std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
-    bool m_sendVRCFTHandShakeMsg = true;
-
-    bool InitializeProxyServer()
-    {
-//#ifdef XR_USE_OXR_OCULUS
-//        if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE) {
-//            Log::Write(Log::Level::Warning, "Facial & Eye Tracking not enabled, a VRCFT proxy server not created.");
-//            return false;
-//        }
-//#endif
-
-        m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
-        assert(m_vrcftProxyServer != nullptr);
-        m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
-        return true;
+    bool IsEyeTrackingEnabled() const {
+        if (eyeTracker_ != XR_NULL_HANDLE)
+            return true;
+        return IsExtEyeGazeInteractionSupported();
     }
 
 
@@ -1296,6 +1308,12 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     bool InitializeFBFacialTracker()
     {
+        if (!IsExtEnabled(XR_FB_FACE_TRACKING_EXTENSION_NAME) ||
+            (m_options && !m_options->IsSelected(ALXRFacialExpressionType::FB))) {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            return false;
+        }
+
         XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
             .next = nullptr
@@ -1306,7 +1324,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (!faceTrackingSystemProperties.supportsFaceTracking) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
             return false;
         }
 
@@ -1329,7 +1347,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_xrCreateFaceTrackerFB_ == nullptr ||
             m_xrDestroyFaceTrackerFB_ == nullptr ||
             m_xrGetFaceExpressionWeightsFB_ == nullptr) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
             return false;
         }
 
@@ -1352,8 +1370,10 @@ struct OpenXrProgram final : IOpenXrProgram {
 
     bool InitializeHTCFacialTracker() {
 
-        if (!IsExtEnabled(XR_HTC_FACIAL_TRACKING_EXTENSION_NAME)) {
-            Log::Write(Log::Level::Info, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
+        if (!IsExtEnabled(XR_HTC_FACIAL_TRACKING_EXTENSION_NAME) ||
+            (m_options && !m_options->IsSelected(ALXRFacialExpressionType::HTC)))
+        {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
             return false;
         }
 
@@ -1370,7 +1390,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (!faceTrackingSystemProperties.supportEyeFacialTracking &&
             !faceTrackingSystemProperties.supportLipFacialTracking) {
-            Log::Write(Log::Level::Info, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
             return false;
         }
 
@@ -1392,7 +1412,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_xrCreateFaceTrackerHTC == nullptr ||
             m_xrDestroyFacialTrackerHTC == nullptr ||
             m_xrGetFacialExpressionsHTC == nullptr) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
             return false;
         }
 
@@ -1400,7 +1420,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         assert(m_facialTrackersHTC.size() == 2);
         auto facialTrackerPtr = m_facialTrackersHTC.data();
-        for (const auto [isTrackingTypeSupported, facialTrackingType] : {
+        for (const auto& [isTrackingTypeSupported, facialTrackingType] : {
             std::make_tuple(faceTrackingSystemProperties.supportEyeFacialTracking, XR_FACIAL_TRACKING_TYPE_EYE_DEFAULT_HTC),
             std::make_tuple(faceTrackingSystemProperties.supportLipFacialTracking, XR_FACIAL_TRACKING_TYPE_LIP_DEFAULT_HTC)
         }) {
@@ -1434,11 +1454,50 @@ struct OpenXrProgram final : IOpenXrProgram {
         return InitializeHTCFacialTracker();
     }
 
+    bool IsFacialTrackingEnabled() const {
+        if (faceTracker_ != XR_NULL_HANDLE)
+            return true;
+        return std::any_of(
+            m_facialTrackersHTC.begin(), m_facialTrackersHTC.end(),
+            [](const auto facialTrackerPtr) { return facialTrackerPtr != XR_NULL_HANDLE; }
+        );
+    }
+
+    std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
+    bool m_sendVRCFTHandShakeMsg = true;
+
+    bool InitializeProxyServer()
+    {
+        if (m_options && m_options->NoFTServer) {
+            Log::Write(Log::Level::Info,
+                "\"no_tracking_server\" option is enabled, tracking proxy server will not be created. "
+                "No third-party/external apps such as VRCFT will be able to connect.");
+            return false;
+        }
+
+        if (!IsEyeTrackingEnabled() && !IsFacialTrackingEnabled()) {
+            Log::Write(Log::Level::Warning, "No Facial or Eye Tracking enabled/supported, FacialEye Tracking proxy server not created.");
+            return false;
+        }
+
+        m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
+        assert(m_vrcftProxyServer != nullptr);
+        m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
+        Log::Write(Log::Level::Info, "FacialEye Tracking proxy server created.");
+        return true;
+    }
+
     bool InitializeHandTrackers()
     {
-        //if (m_instance != XR_NULL_HANDLE && m_systemId != XR_NULL_SYSTEM_ID)
-        //    return false;
+        assert(m_instance != XR_NULL_HANDLE);
+        assert(m_session != XR_NULL_HANDLE);
 
+        if (!IsExtEnabled(XR_EXT_HAND_TRACKING_EXTENSION_NAME) ||
+            (m_options && m_options->NoHandTracking)) {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
+            return false;
+        }
+        
         // Inspect hand tracking system properties
         XrSystemHandTrackingPropertiesEXT handTrackingSystemProperties{ 
             .type = XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT,
@@ -1448,7 +1507,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         XrSystemProperties systemProperties{ .type=XR_TYPE_SYSTEM_PROPERTIES, .next = &handTrackingSystemProperties };
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (!handTrackingSystemProperties.supportsHandTracking) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
             // The system does not support hand tracking
             return false;
         }
@@ -1466,9 +1525,12 @@ struct OpenXrProgram final : IOpenXrProgram {
             reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnDestroyHandTrackerEXT)));
 
         if (m_pfnCreateHandTrackerEXT == nullptr ||
-            m_pfnLocateHandJointsEXT == nullptr  ||
+            m_pfnLocateHandJointsEXT == nullptr ||
             m_pfnDestroyHandTrackerEXT == nullptr)
+        {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
             return false;
+        }
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
 
         // Create a hand tracker for left hand that tracks default set of hand joints.
@@ -1499,7 +1561,10 @@ struct OpenXrProgram final : IOpenXrProgram {
     {
         if (m_instance == XR_NULL_HANDLE ||
             m_systemId == XR_NULL_SYSTEM_ID ||
-            !IsExtEnabled(XR_FB_PASSTHROUGH_EXTENSION_NAME)) {
+            !IsExtEnabled(XR_FB_PASSTHROUGH_EXTENSION_NAME) ||
+            (m_options && m_options->NoPassthrough))
+        {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
             return false;
         }
 
@@ -1514,7 +1579,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
         if (passthroughSystemProperties.supportsPassthrough == XR_FALSE) {
-            Log::Write(Log::Level::Info, Fmt("%s is not supported.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
             return false;
         }
         Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
@@ -1567,11 +1632,14 @@ struct OpenXrProgram final : IOpenXrProgram {
     {
         if (m_instance == XR_NULL_HANDLE ||
             m_systemId == XR_NULL_SYSTEM_ID ||
-            !IsExtEnabled(XR_HTC_PASSTHROUGH_EXTENSION_NAME)) {
+            !IsExtEnabled(XR_HTC_PASSTHROUGH_EXTENSION_NAME) ||
+            (m_options && m_options->NoPassthrough))
+        {
+            Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_HTC_PASSTHROUGH_EXTENSION_NAME));
             return false;
         }
 
-        Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_FB_PASSTHROUGH_EXTENSION_NAME));
+        Log::Write(Log::Level::Info, Fmt("%s enabled.", XR_HTC_PASSTHROUGH_EXTENSION_NAME));
 
 #define CAT(x,y) x ## y
 #define INIT_PFN(ExtName)\
@@ -1599,7 +1667,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             return true;
 #ifdef XR_USE_OXR_PICO_ANY_VERSION
         if (m_pfnInvokeFunctionsPICO != nullptr)
-            return true;
+            return m_options == nullptr ? true : !m_options->NoPassthrough;
 #endif
         if (m_pfnCreatePassthroughHTC != nullptr)
             return true;
@@ -1614,7 +1682,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 #ifdef XR_USE_OXR_PICO_ANY_VERSION
     bool SetPICOSeeThroughBackground(const bool enable) {
         if (m_session == XR_NULL_HANDLE ||
-            m_pfnInvokeFunctionsPICO == nullptr)
+            m_pfnInvokeFunctionsPICO == nullptr ||
+            (m_options && m_options->NoPassthrough))
             return false;
 
         const auto graphicsPluginPtr = m_graphicsPlugin;
@@ -3057,131 +3126,123 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-    constexpr static const std::size_t MaxExpressionCount = 63;
-    static_assert((XR_FACIAL_EXPRESSION_LIP_COUNT_HTC + XR_FACIAL_EXPRESSION_EYE_COUNT_HTC) <= MaxExpressionCount);
-
-    constexpr static const std::size_t MaxEyeCount = 2;
-
-    enum class VRFCFTExpressionType : std::uint8_t {
-        None=0, // Not Support or Disabled
-        FB,
-        HTC,
-        Pico,
-        TypeCount
-    };
-    enum class VRFCFTEyeType : std::uint8_t {
-        None=0, // Not Support or Disabled
-        FBEyeTrackingSocial,
-        ExtEyeGazeInteraction,
-        TypeCount
-    };
-#pragma pack(push, 1)
-    struct VRCFTPacket {
-        VRFCFTExpressionType expressionType;
-        VRFCFTEyeType        eyeTrackerType;        
-        std::uint8_t         isEyeFollowingBlendshapesValid;
-        std::uint8_t         isEyeGazePoseValid[MaxEyeCount];
-        float                expressionWeights[MaxExpressionCount];
-        XrPosef              eyeGazePoses[MaxEyeCount];
-    };
-#pragma pack(pop)
-
     static_assert(XR_FACE_EXPRESSION_COUNT_FB <= MaxExpressionCount);
     float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
 
-    VRCFTPacket newVRCFTPacket {
-        .expressionType = VRFCFTExpressionType::None,
-        .eyeTrackerType = VRFCFTEyeType::None,
+    inline void PollFaceEyeTracking(const XrTime& ptime, ALXRFacialEyePacket& newPacket)
+    {
+        const bool noOptions = m_options == nullptr;
+        if (noOptions || m_options->IsSelected(ALXRFacialExpressionType::HTC))
+        {
+            for (const auto& [facialTracker, exprCount, offset] : {
+                    std::make_tuple(m_facialTrackersHTC[0], XR_FACIAL_EXPRESSION_EYE_COUNT_HTC, 0),
+                    std::make_tuple(m_facialTrackersHTC[1], XR_FACIAL_EXPRESSION_LIP_COUNT_HTC, XR_FACIAL_EXPRESSION_EYE_COUNT_HTC)
+                })
+            {
+                if (facialTracker == XR_NULL_HANDLE)
+                    continue;
+                XrFacialExpressionsHTC xrFacialExpr{
+                    .type = XR_TYPE_FACIAL_EXPRESSIONS_HTC,
+                    .next = nullptr,
+                    .isActive = XR_FALSE,
+                    .sampleTime = ptime,
+                    .expressionCount = static_cast<std::uint32_t>(exprCount),
+                    .expressionWeightings = newPacket.expressionWeights + offset
+                };
+                if (XR_FAILED(m_xrGetFacialExpressionsHTC(facialTracker, &xrFacialExpr)))
+                    continue;
+                newPacket.expressionType = ALXRFacialExpressionType::HTC;
+            }
+        }
+
+        if (noOptions || m_options->IsSelected(ALXRFacialExpressionType::FB))
+        {
+            if (faceTracker_ != XR_NULL_HANDLE) {
+                const XrFaceExpressionInfoFB expressionInfo{
+                    .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
+                    .next = nullptr,
+                    .time = ptime
+                };
+                XrFaceExpressionWeightsFB expressionWeights{
+                    .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
+                    .next = nullptr,
+                    .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
+                    .weights = newPacket.expressionWeights,
+                    .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
+                    .confidences = confidence_
+                };
+                assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+                m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
+
+                newPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
+                newPacket.expressionType = ALXRFacialExpressionType::FB;
+            }
+        }
+
+        if (noOptions || m_options->IsSelected(ALXREyeTrackingType::ExtEyeGazeInteraction))
+        {
+            if (const auto spaceLocOption = m_interactionManager->GetEyeGazeSpaceLocation(m_viewSpace, ptime)) {
+                const auto& spaceLoc = spaceLocOption.value();
+                const bool hasValidPose = Math::Pose::IsPoseValid(spaceLoc);
+                for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
+                    newPacket.isEyeGazePoseValid[idx] = hasValidPose;
+                    if (hasValidPose) {
+                        newPacket.eyeGazePoses[idx] = spaceLoc.pose;
+                    }
+                }
+                newPacket.eyeTrackerType = ALXREyeTrackingType::ExtEyeGazeInteraction;
+                newPacket.isEyeFollowingBlendshapesValid = 0;
+            }
+        }
+
+        if (noOptions || m_options->IsSelected(ALXREyeTrackingType::FBEyeTrackingSocial))
+        {
+            if (eyeTracker_ != XR_NULL_HANDLE) {
+                const XrEyeGazesInfoFB gazesInfo{
+                    .type = XR_TYPE_EYE_GAZES_INFO_FB,
+                    .next = nullptr,
+                    .baseSpace = m_viewSpace,
+                    .time = ptime
+                };
+                XrEyeGazesFB eyeGazes{
+                    .type = XR_TYPE_EYE_GAZES_FB,
+                    .next = nullptr
+                };
+                assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+                m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
+
+                newPacket.eyeTrackerType = ALXREyeTrackingType::FBEyeTrackingSocial;
+                for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
+                    const auto& gaze = eyeGazes.gaze[idx];
+                    newPacket.eyeGazePoses[idx] = gaze.gazePose;
+                    newPacket.isEyeGazePoseValid[idx] = static_cast<std::uint8_t>(gaze.isValid);
+                }
+            }
+        }
+
+    }
+
+    ALXRFacialEyePacket newFTPacket{
+        .expressionType = ALXRFacialExpressionType::None,
+        .eyeTrackerType = ALXREyeTrackingType::None,
         .isEyeFollowingBlendshapesValid = 0,
         .isEyeGazePoseValid { 0,0 },
     };
-
     void PollFaceEyeTracking(const XrTime& ptime)
     {
-        if (ptime == 0 || m_vrcftProxyServer == nullptr)
+        if (m_vrcftProxyServer == nullptr || ptime == 0)
             return;
-
-        for (const auto& [facialTracker, exprCount, offset] : {
-                std::make_tuple(m_facialTrackersHTC[0], XR_FACIAL_EXPRESSION_EYE_COUNT_HTC, 0),
-                std::make_tuple(m_facialTrackersHTC[1], XR_FACIAL_EXPRESSION_LIP_COUNT_HTC, XR_FACIAL_EXPRESSION_EYE_COUNT_HTC)
-        })
-        {
-            if (facialTracker == XR_NULL_HANDLE)
-                continue;
-            XrFacialExpressionsHTC xrFacialExpr{
-                .type = XR_TYPE_FACIAL_EXPRESSIONS_HTC,
-                .next = nullptr,
-                .isActive = XR_FALSE,
-                .sampleTime = ptime,
-                .expressionCount = static_cast<std::uint32_t>(exprCount),
-                .expressionWeightings = newVRCFTPacket.expressionWeights + offset
-            };
-            if (XR_FAILED(m_xrGetFacialExpressionsHTC(facialTracker, &xrFacialExpr)))
-                continue;
-            newVRCFTPacket.expressionType = VRFCFTExpressionType::HTC;
-        }
-
-        if (faceTracker_ != XR_NULL_HANDLE) {
-            const XrFaceExpressionInfoFB expressionInfo{
-                .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
-                .next = nullptr,
-                .time = ptime
-            };
-            XrFaceExpressionWeightsFB expressionWeights{
-                .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
-                .next = nullptr,
-                .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
-                .weights = newVRCFTPacket.expressionWeights,
-                .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
-                .confidences = confidence_
-            };
-            assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-            m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
-            
-            newVRCFTPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
-            newVRCFTPacket.expressionType = VRFCFTExpressionType::FB;
-        }
-
-        if (const auto spaceLocOption = m_interactionManager->GetEyeGazeSpaceLocation(m_viewSpace, ptime)) {
-            const auto& spaceLoc = spaceLocOption.value();
-            if (Math::Pose::IsPoseValid(spaceLoc)) {
-
-                for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
-                    newVRCFTPacket.eyeGazePoses[idx] = spaceLoc.pose;
-                    newVRCFTPacket.isEyeGazePoseValid[idx] = XR_TRUE;
-                }
-                newVRCFTPacket.eyeTrackerType = VRFCFTEyeType::ExtEyeGazeInteraction;
-                newVRCFTPacket.isEyeFollowingBlendshapesValid = 0;
-            }
-        }
-
-        if (eyeTracker_ != XR_NULL_HANDLE) {
-            const XrEyeGazesInfoFB gazesInfo{
-                .type = XR_TYPE_EYE_GAZES_INFO_FB,
-                .next = nullptr,
-                .baseSpace = m_viewSpace,
-                .time = ptime
-            };
-            XrEyeGazesFB eyeGazes{
-                .type = XR_TYPE_EYE_GAZES_FB,
-                .next = nullptr
-            };
-            assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-            m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
-
-            newVRCFTPacket.eyeTrackerType = VRFCFTEyeType::FBEyeTrackingSocial;
-            for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
-                const auto& gaze = eyeGazes.gaze[idx];
-                newVRCFTPacket.eyeGazePoses[idx] = gaze.gazePose;
-                newVRCFTPacket.isEyeGazePoseValid[idx] = static_cast<std::uint8_t>(gaze.isValid);
-            }
-        }
-
+        PollFaceEyeTracking(ptime, newFTPacket);
         assert(m_vrcftProxyServer != nullptr);
         m_vrcftProxyServer->PollOne();
         if (m_vrcftProxyServer->IsConnected()) {
-            m_vrcftProxyServer->Send(newVRCFTPacket);
+            m_vrcftProxyServer->Send(newFTPacket);
         }
+    }
+
+    virtual inline void PollFaceEyeTracking(ALXRFacialEyePacket& newPacket) override
+    {
+        PollFaceEyeTracking(m_lastPredicatedDisplayTime, newPacket);
     }
 
     void PollStreamConfigEvents()
