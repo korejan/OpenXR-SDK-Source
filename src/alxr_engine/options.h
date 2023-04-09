@@ -5,6 +5,7 @@
 #pragma once
 
 #include "pch.h"
+#include "alxr_ctypes.h"
 
 inline XrFormFactor GetXrFormFactor(const std::string& formFactorStr) {
     if (EqualsIgnoreCase(formFactorStr, "Hmd")) {
@@ -118,6 +119,9 @@ struct Options {
 
     FirmwareVersion firmwareVersion{};
 
+    ALXRFacialExpressionType FacialTracking = ALXRFacialExpressionType::Auto;
+    ALXREyeTrackingType      EyeTracking = ALXREyeTrackingType::Auto;
+
     XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_QUEST_FB;
     bool DisableLinearizeSrgb=false;
     bool DisableSuggestedBindings = false;
@@ -125,6 +129,9 @@ struct Options {
     bool NoFrameSkip = false;
     bool DisableLocalDimming = false;
     bool HeadlessSession = false;
+    bool NoFTServer = false;
+    bool NoPassthrough = false;
+    bool NoHandTracking = false;
 
     struct {
         XrFormFactor FormFactor{XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY};
@@ -160,5 +167,13 @@ struct Options {
     void SetEnvironmentBlendMode(XrEnvironmentBlendMode environmentBlendMode) {
         EnvironmentBlendMode = GetXrEnvironmentBlendModeStr(environmentBlendMode);
         Parsed.EnvironmentBlendMode = environmentBlendMode;
+    }
+
+    inline bool IsSelected(const ALXRFacialExpressionType t) const {
+        return FacialTracking == ALXRFacialExpressionType::Auto || FacialTracking == t;
+    }
+
+    inline bool IsSelected(const ALXREyeTrackingType t) const {
+        return EyeTracking == ALXREyeTrackingType::Auto || EyeTracking == t;
     }
 };

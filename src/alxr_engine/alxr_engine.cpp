@@ -19,6 +19,7 @@
 #include <mutex>
 
 #include "alxr_engine.h"
+#include "alxr_facial_eye_tracking_packet.h"
 
 #include "timing.h"
 #include "interaction_manager.h"
@@ -117,6 +118,11 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
         options->NoFrameSkip = ctx.noFrameSkip;
         options->DisableLocalDimming = ctx.disableLocalDimming;
         options->HeadlessSession = ctx.headlessSession;
+        options->NoFTServer = ctx.noFTServer;
+        options->NoPassthrough = ctx.noPassthrough;
+        options->NoHandTracking = ctx.noHandTracking;
+        options->FacialTracking = ctx.facialTracking;
+        options->EyeTracking = ctx.eyeTracking;
         options->DisplayColorSpace = static_cast<XrColorSpaceFB>(ctx.displayColorSpace);
         const auto& fmVersion = ctx.firmwareVersion;
         options->firmwareVersion = { fmVersion.major, fmVersion.minor, fmVersion.patch };
@@ -219,6 +225,23 @@ void alxr_process_frame(bool* exitRenderLoop /*= non-null */, bool* requestResta
     {
         std::scoped_lock lk(gRenderMutex);
         gProgram->RenderFrame();
+    }
+}
+
+void alxr_process_frame2(ALXRProcessFrameResult* frameResult) {
+    assert(frameResult != nullptr);
+
+    gProgram->PollEvents(&frameResult->exitRenderLoop, &frameResult->requestRestart);
+    if (frameResult->exitRenderLoop || !gProgram->IsSessionRunning())
+        return;
+
+    {
+        std::scoped_lock lk(gRenderMutex);
+        gProgram->RenderFrame();
+    }
+
+    if (frameResult->newPacket) {
+        gProgram->PollFaceEyeTracking(*frameResult->newPacket);
     }
 }
 
