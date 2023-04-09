@@ -11,6 +11,7 @@ struct ALXRStreamConfig;
 struct ALXRSystemProperties;
 struct ALXRGuardianData;
 struct ALXREyeInfo;
+struct ALXRFacialEyePacket;
 struct TrackingInfo;
 
 namespace ALXR {;
@@ -90,6 +91,8 @@ struct IOpenXrProgram {
     // Sample input actions and generate haptic feedback.
     virtual void PollActions() = 0;
 
+    virtual void PollFaceEyeTracking(ALXRFacialEyePacket& newPacket) = 0;
+    
     // Create and submit a frame.
     virtual void RenderFrame() = 0;
 
