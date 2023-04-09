@@ -1,5 +1,7 @@
 # find . -name "*.*pp" | sed -e 's/^\.\///' | sed -e 's/^.*$/  & \\/' | sort
 nobase_include_HEADERS = \
+	asio/any_completion_executor.hpp \
+	asio/any_completion_handler.hpp \
 	asio/any_io_executor.hpp \
 	asio/append.hpp \
 	asio/as_tuple.hpp \
@@ -49,6 +51,7 @@ nobase_include_HEADERS = \
 	asio/compose.hpp \
 	asio/connect.hpp \
 	asio/connect_pipe.hpp \
+	asio/consign.hpp \
 	asio/coroutine.hpp \
 	asio/deadline_timer.hpp \
 	asio/defer.hpp \
@@ -70,6 +73,7 @@ nobase_include_HEADERS = \
 	asio/detail/chrono.hpp \
 	asio/detail/chrono_time_traits.hpp \
 	asio/detail/completion_handler.hpp \
+	asio/detail/composed_work.hpp \
 	asio/detail/concurrency_hint.hpp \
 	asio/detail/conditionally_enabled_event.hpp \
 	asio/detail/conditionally_enabled_mutex.hpp \
@@ -391,6 +395,7 @@ nobase_include_HEADERS = \
 	asio/experimental/channel.hpp \
 	asio/experimental/channel_error.hpp \
 	asio/experimental/channel_traits.hpp \
+	asio/experimental/co_composed.hpp \
 	asio/experimental/co_spawn.hpp \
 	asio/experimental/concurrent_channel.hpp \
 	asio/experimental/coro.hpp \
@@ -404,21 +409,24 @@ nobase_include_HEADERS = \
 	asio/experimental/detail/channel_send_functions.hpp \
 	asio/experimental/detail/channel_send_op.hpp \
 	asio/experimental/detail/channel_service.hpp \
-	asio/experimental/detail/completion_handler_erasure.hpp \
+	asio/experimental/detail/coro_completion_handler.hpp \
 	asio/experimental/detail/coro_promise_allocator.hpp \
 	asio/experimental/detail/has_signature.hpp \
 	asio/experimental/detail/impl/channel_service.hpp \
 	asio/experimental/detail/partial_promise.hpp \
 	asio/experimental/impl/as_single.hpp \
 	asio/experimental/impl/channel_error.ipp \
+	asio/experimental/impl/co_composed.hpp \
 	asio/experimental/impl/coro.hpp \
 	asio/experimental/impl/parallel_group.hpp \
 	asio/experimental/impl/promise.hpp \
 	asio/experimental/impl/use_coro.hpp \
+	asio/experimental/impl/use_promise.hpp \
 	asio/experimental/parallel_group.hpp \
 	asio/experimental/prepend.hpp \
 	asio/experimental/promise.hpp \
 	asio/experimental/use_coro.hpp \
+	asio/experimental/use_promise.hpp \
 	asio/file_base.hpp \
 	asio/generic/basic_endpoint.hpp \
 	asio/generic/datagram_protocol.hpp \
@@ -432,6 +440,7 @@ nobase_include_HEADERS = \
 	asio/handler_invoke_hook.hpp \
 	asio/high_resolution_timer.hpp \
 	asio.hpp \
+	asio/impl/any_completion_executor.ipp \
 	asio/impl/any_io_executor.ipp \
 	asio/impl/append.hpp \
 	asio/impl/as_tuple.hpp \
@@ -443,6 +452,7 @@ nobase_include_HEADERS = \
 	asio/impl/connect.hpp \
 	asio/impl/connect_pipe.hpp \
 	asio/impl/connect_pipe.ipp \
+	asio/impl/consign.hpp \
 	asio/impl/defer.hpp \
 	asio/impl/deferred.hpp \
 	asio/impl/detached.hpp \
