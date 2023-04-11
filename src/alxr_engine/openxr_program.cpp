@@ -3173,11 +3173,11 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .isActive = XR_FALSE,
                     .sampleTime = ptime,
                     .expressionCount = static_cast<std::uint32_t>(exprCount),
-                    .expressionWeightings = newFTPacket.expressionWeights + offset
+                    .expressionWeightings = newPacket.expressionWeights + offset
                 };
                 if (XR_FAILED(m_xrGetFacialExpressionsHTC(facialTracker, &xrFacialExpr)))
                     continue;
-                newFTPacket.expressionType = ALXRFacialExpressionType::HTC;
+                newPacket.expressionType = ALXRFacialExpressionType::HTC;
             }
         }
 
@@ -3194,15 +3194,15 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .type = XR_TYPE_FACE_EXPRESSION_WEIGHTS_FB,
                     .next = nullptr,
                     .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
-                    .weights = newFTPacket.expressionWeights,
+                    .weights = newPacket.expressionWeights,
                     .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
                     .confidences = confidence_
                 };
                 assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
                 m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
 
-                newFTPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
-                newFTPacket.expressionType = ALXRFacialExpressionType::FB;
+                newPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
+                newPacket.expressionType = ALXRFacialExpressionType::FB;
             }
         }
 #endif
@@ -3213,13 +3213,13 @@ struct OpenXrProgram final : IOpenXrProgram {
                 const auto& spaceLoc = spaceLocOption.value();
                 const bool hasValidPose = Math::Pose::IsPoseValid(spaceLoc);
                 for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
-                    newFTPacket.isEyeGazePoseValid[idx] = hasValidPose;
+                    newPacket.isEyeGazePoseValid[idx] = hasValidPose;
                     if (hasValidPose) {
-                        newFTPacket.eyeGazePoses[idx] = spaceLoc.pose;
+                        newPacket.eyeGazePoses[idx] = spaceLoc.pose;
                     }
                 }
-                newFTPacket.eyeTrackerType = ALXREyeTrackingType::ExtEyeGazeInteraction;
-                newFTPacket.isEyeFollowingBlendshapesValid = 0;
+                newPacket.eyeTrackerType = ALXREyeTrackingType::ExtEyeGazeInteraction;
+                newPacket.isEyeFollowingBlendshapesValid = 0;
             }
         }
 
@@ -3240,11 +3240,11 @@ struct OpenXrProgram final : IOpenXrProgram {
                 assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
                 m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
 
-                newFTPacket.eyeTrackerType = ALXREyeTrackingType::FBEyeTrackingSocial;
+                newPacket.eyeTrackerType = ALXREyeTrackingType::FBEyeTrackingSocial;
                 for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
                     const auto& gaze = eyeGazes.gaze[idx];
-                    newFTPacket.eyeGazePoses[idx] = gaze.gazePose;
-                    newFTPacket.isEyeGazePoseValid[idx] = static_cast<std::uint8_t>(gaze.isValid);
+                    newPacket.eyeGazePoses[idx] = gaze.gazePose;
+                    newPacket.isEyeGazePoseValid[idx] = static_cast<std::uint8_t>(gaze.isValid);
                 }
             }
         }
