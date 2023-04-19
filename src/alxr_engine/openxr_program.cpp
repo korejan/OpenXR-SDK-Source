@@ -451,6 +451,13 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
+        for (auto facialTracker : m_facialTrackersHTC) {
+            if (facialTracker != XR_NULL_HANDLE) {
+                Log::Write(Log::Level::Verbose, "Destroying FacialTrackerHTC");
+                m_xrDestroyFacialTrackerHTC(facialTracker);
+            }
+        }
+
         if (m_vrcftProxyServer != nullptr) {
             Log::Write(Log::Level::Verbose, "Shutting Down Proxy Server");
             m_vrcftProxyServer->Close();
