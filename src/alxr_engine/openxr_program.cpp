@@ -675,7 +675,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         const bool enableSRGBLinearization = [this]() {
             if (IsPrePicoPUIv5_4())
                 return false;
-            return !(m_options->DisableLinearizeSrgb || IsRuntime(OxrRuntimeType::HTCWave));
+            return !m_options->DisableLinearizeSrgb;// || IsRuntime(OxrRuntimeType::HTCWave));
         }();
         m_graphicsPlugin->SetEnableLinearizeRGB(enableSRGBLinearization);
 #ifdef XR_USE_OXR_PICO_ANY_VERSION
@@ -2072,7 +2072,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_pfnLocateHandJointsEXT == nullptr || time == 0)
             return;
 
-        const bool isHandOnControllerPose = IsRuntime(OxrRuntimeType::HTCWave) ||
+        const bool isHandOnControllerPose = //IsRuntime(OxrRuntimeType::HTCWave) ||
                                             IsRuntime(OxrRuntimeType::SteamVR) ||
                                             IsRuntime(OxrRuntimeType::WMR) ||
                                             IsRuntime(OxrRuntimeType::MagicLeap);

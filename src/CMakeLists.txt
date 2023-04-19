@@ -772,4 +772,5 @@ add_subdirectory(alxr_engine)
 
 if(BUILD_CONFORMANCE_TESTS)
     add_subdirectory(conformance)
+    add_subdirectory(external/catch2)
 endif()
