@@ -35,9 +35,7 @@
     #include <unistd.h>
 #endif
 
-#ifdef XR_USE_OXR_OCULUS
-    #include "vrcft_proxy_server.h"
-#endif
+#include "vrcft_proxy_server.h"
 
 #include "xr_utils.h"
 #include "concurrent_queue.h"
@@ -436,7 +434,6 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-#ifdef XR_USE_OXR_OCULUS
         if (eyeTracker_ != XR_NULL_HANDLE)
         {
             Log::Write(Log::Level::Verbose, "Destroying EyeTracker");
@@ -454,7 +451,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             m_vrcftProxyServer->Close();
             m_vrcftProxyServer.reset();
         }
-#endif
+
         m_interactionManager.reset();
 
         if (m_visualizedSpaces.size() > 0) {
@@ -1177,14 +1174,12 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-#ifdef XR_USE_OXR_OCULUS
     XrEyeTrackerFB eyeTracker_ = XR_NULL_HANDLE;
     PFN_xrDestroyEyeTrackerFB m_xrDestroyEyeTrackerFB_ = nullptr;
     PFN_xrGetEyeGazesFB m_xrGetEyeGazesFB_ = nullptr;
-#endif
+
     bool InitializeEyeTrackers()
     {
-#ifdef XR_USE_OXR_OCULUS
         XrSystemEyeTrackingPropertiesFB eyeTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_EYE_TRACKING_PROPERTIES_FB,
             .next = nullptr
@@ -1227,21 +1222,18 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTracker_));
         CHECK(eyeTracker_ != XR_NULL_HANDLE);
-#endif
         return true;
     }
 
-#ifdef XR_USE_OXR_OCULUS
     XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
     PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
     PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
 
     std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
     bool m_sendVRCFTHandShakeMsg = true;
-#endif
+
     bool InitializeProxyServer()
     {
-#ifdef XR_USE_OXR_OCULUS
         if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE) {
             Log::Write(Log::Level::Warning, "Facial & Eye Tracking not enabled, a VRCFT proxy server not created.");
             return false;
@@ -1249,13 +1241,11 @@ struct OpenXrProgram final : IOpenXrProgram {
         m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
         assert(m_vrcftProxyServer != nullptr);
         m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
-#endif
         return true;
     }
 
     bool InitializeFacialTracker()
     {
-#ifdef XR_USE_OXR_OCULUS
         XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
             .next = nullptr
@@ -1303,7 +1293,6 @@ struct OpenXrProgram final : IOpenXrProgram {
         };
         CHECK_XRCMD(m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTracker_));
         CHECK(faceTracker_ != XR_NULL_HANDLE);
-#endif
         return true;
     }
 
@@ -2930,7 +2919,6 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-#ifdef XR_USE_OXR_OCULUS
     float weights_[XR_FACE_EXPRESSION_COUNT_FB] = {};
     float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
     
@@ -2956,11 +2944,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         memcpy(ft_et_buf + 24, &face_enabled, sizeof(face_enabled));
         return m_vrcftProxyServer->Send(ft_et_buffer);
     }
-#endif
-    
+
     void PollFaceEyeTracking(const XrTime& ptime)
     {
-#ifdef XR_USE_OXR_OCULUS
         if (eyeTracker_ == XR_NULL_HANDLE || faceTracker_ == XR_NULL_HANDLE || ptime == 0)
             return;
 
@@ -3018,9 +3004,6 @@ struct OpenXrProgram final : IOpenXrProgram {
 
             m_vrcftProxyServer->Send(ft_et_buffer);
         }
-#else
-        (void)ptime;
-#endif
     }
 
     void PollStreamConfigEvents()
