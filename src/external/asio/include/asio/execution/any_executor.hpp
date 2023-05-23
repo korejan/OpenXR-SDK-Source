@@ -2,7 +2,7 @@
 // execution/any_executor.hpp
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// Copyright (c) 2003-2022 Christopher M. Kohlhoff (chris at kohlhoff dot com)
+// Copyright (c) 2003-2023 Christopher M. Kohlhoff (chris at kohlhoff dot com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -992,27 +992,34 @@ protected:
   static bool equal_ex(const any_executor_base& ex1,
       const any_executor_base& ex2)
   {
-    return *ex1.target<Ex>() == *ex2.target<Ex>();
+    const Ex* p1 = ex1.target<Ex>();
+    const Ex* p2 = ex2.target<Ex>();
+    ASIO_ASSUME(p1 != 0 && p2 != 0);
+    return *p1 == *p2;
   }
 
   template <typename Ex>
   static void execute_ex(const any_executor_base& ex,
       ASIO_MOVE_ARG(function) f)
   {
+    const Ex* p = ex.target<Ex>();
+    ASIO_ASSUME(p != 0);
 #if defined(ASIO_NO_DEPRECATED)
-    ex.target<Ex>()->execute(ASIO_MOVE_CAST(function)(f));
+    p->execute(ASIO_MOVE_CAST(function)(f));
 #else // defined(ASIO_NO_DEPRECATED)
-    execution::execute(*ex.target<Ex>(), ASIO_MOVE_CAST(function)(f));
+    execution::execute(*p, ASIO_MOVE_CAST(function)(f));
 #endif // defined(ASIO_NO_DEPRECATED)
   }
 
   template <typename Ex>
   static void blocking_execute_ex(const any_executor_base& ex, function_view f)
   {
+    const Ex* p = ex.target<Ex>();
+    ASIO_ASSUME(p != 0);
 #if defined(ASIO_NO_DEPRECATED)
-    ex.target<Ex>()->execute(f);
+    p->execute(f);
 #else // defined(ASIO_NO_DEPRECATED)
-    execution::execute(*ex.target<Ex>(), f);
+    execution::execute(*p, f);
 #endif // defined(ASIO_NO_DEPRECATED)
   }
 
