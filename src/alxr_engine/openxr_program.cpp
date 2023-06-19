@@ -455,12 +455,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-        if (m_vrcftProxyServer != nullptr) {
-            Log::Write(Log::Level::Verbose, "Shutting Down Proxy Server");
-            m_vrcftProxyServer->Close();
-            m_vrcftProxyServer.reset();
-        }
-
+        m_vrcftProxyServer.reset();
+        
         m_interactionManager.reset();
 
         if (m_visualizedSpaces.size() > 0) {
@@ -1316,7 +1312,8 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
-            .next = nullptr
+            .next = nullptr,
+            .supportsFaceTracking = XR_FALSE
         };
         XrSystemProperties systemProperties{
             .type = XR_TYPE_SYSTEM_PROPERTIES,
@@ -1464,8 +1461,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
-    bool m_sendVRCFTHandShakeMsg = true;
-
+    
     bool InitializeProxyServer()
     {
         if (m_options && m_options->NoFTServer) {
@@ -1482,7 +1478,6 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
         assert(m_vrcftProxyServer != nullptr);
-        m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
         Log::Write(Log::Level::Info, "FacialEye Tracking proxy server created.");
         return true;
     }
@@ -3127,7 +3122,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     static_assert(XR_FACE_EXPRESSION_COUNT_FB <= MaxExpressionCount);
-    float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
+    std::array<float, XR_FACE_EXPRESSION_COUNT_FB> m_confidences {};
 
     inline void PollFaceEyeTracking(const XrTime& ptime, ALXRFacialEyePacket& newPacket)
     {
@@ -3169,7 +3164,7 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
                     .weights = newPacket.expressionWeights,
                     .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
-                    .confidences = confidence_
+                    .confidences = m_confidences.data()
                 };
                 assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
                 m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
@@ -3219,7 +3214,6 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
             }
         }
-
     }
 
     ALXRFacialEyePacket newFTPacket{
@@ -3230,14 +3224,11 @@ struct OpenXrProgram final : IOpenXrProgram {
     };
     void PollFaceEyeTracking(const XrTime& ptime)
     {
-        if (m_vrcftProxyServer == nullptr || ptime == 0)
+        if (ptime == 0 || m_vrcftProxyServer == nullptr ||
+            !m_vrcftProxyServer->IsConnected())
             return;
         PollFaceEyeTracking(ptime, newFTPacket);
-        assert(m_vrcftProxyServer != nullptr);
-        m_vrcftProxyServer->PollOne();
-        if (m_vrcftProxyServer->IsConnected()) {
-            m_vrcftProxyServer->Send(newFTPacket);
-        }
+        m_vrcftProxyServer->SendAsync(newFTPacket);
     }
 
     virtual inline void PollFaceEyeTracking(ALXRFacialEyePacket& newPacket) override

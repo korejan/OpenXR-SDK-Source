@@ -174,6 +174,7 @@ inline std::optional<XrSpaceLocation> EyeGazeInteraction::GetSpaceLocation
 	};
 	if (XR_FAILED(xrLocateSpace(m_eyeGazeSpace, baseSpace, time, &gazeLocation)))
 		return {};
+	gazeLocation.next = nullptr;
 	return gazeLocation;
 }
 

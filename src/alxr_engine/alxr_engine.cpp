@@ -196,6 +196,11 @@ void alxr_stop_decoder_thread()
 }
 
 void alxr_destroy() {
+    const auto rustCtx = gRustCtx;
+    if (rustCtx == nullptr) {
+        assert(gProgram == nullptr);
+        return;
+    }
     Log::Write(Log::Level::Info, "openxrShutdown: Shuttingdown");
     if (const auto programPtr = gProgram) {
         if (const auto graphicsPtr = programPtr->GetGraphicsPlugin()) {
@@ -216,6 +221,7 @@ void alxr_request_exit_session() {
 
 void alxr_process_frame(bool* exitRenderLoop /*= non-null */, bool* requestRestart /*= non-null */) {
     assert(exitRenderLoop != nullptr && requestRestart != nullptr);
+    assert(gProgram != nullptr);
 
     gProgram->PollEvents(exitRenderLoop, requestRestart);
     if (*exitRenderLoop || !gProgram->IsSessionRunning())
@@ -229,19 +235,32 @@ void alxr_process_frame(bool* exitRenderLoop /*= non-null */, bool* requestResta
 }
 
 void alxr_process_frame2(ALXRProcessFrameResult* frameResult) {
-    assert(frameResult != nullptr);
+    try {
+        if (frameResult == nullptr)
+            return;
 
-    gProgram->PollEvents(&frameResult->exitRenderLoop, &frameResult->requestRestart);
-    if (frameResult->exitRenderLoop || !gProgram->IsSessionRunning())
-        return;
+        assert(gProgram != nullptr);
+        gProgram->PollEvents(&frameResult->exitRenderLoop, &frameResult->requestRestart);
+        if (frameResult->exitRenderLoop || !gProgram->IsSessionRunning())
+            return;
 
-    {
-        std::scoped_lock lk(gRenderMutex);
-        gProgram->RenderFrame();
-    }
+        {
+            std::scoped_lock lk(gRenderMutex);
+            gProgram->RenderFrame();
+        }
 
-    if (frameResult->newPacket) {
-        gProgram->PollFaceEyeTracking(*frameResult->newPacket);
+        if (frameResult->newPacket) {
+            gProgram->PollFaceEyeTracking(*frameResult->newPacket);
+        }
+
+    } catch (const std::exception& ex) {
+        frameResult->exitRenderLoop = true;
+        frameResult->requestRestart = false;
+        Log::Write(Log::Level::Error, ex.what());
+    } catch (...) {
+        frameResult->exitRenderLoop = true;
+        frameResult->requestRestart = false;
+        Log::Write(Log::Level::Error, "Unknown Error!");
     }
 }
 
