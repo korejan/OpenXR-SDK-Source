@@ -34,7 +34,7 @@ enum class ALXRDecoderType : uint32_t
     CPU
 };
 
-enum class ALXRFacialExpressionType : unsigned char {
+enum class ALXRFacialExpressionType : uint8_t {
     None = 0, // Not Support or Disabled
     FB,
     HTC,
@@ -43,7 +43,7 @@ enum class ALXRFacialExpressionType : unsigned char {
     TypeCount
 };
 
-enum class ALXREyeTrackingType : unsigned char {
+enum class ALXREyeTrackingType : uint8_t {
     None = 0, // Not Support or Disabled
     FBEyeTrackingSocial,
     ExtEyeGazeInteraction,
@@ -100,7 +100,7 @@ struct ALXRVersion {
     uint32_t patch;
 };
 
-struct ALXRRustCtx
+typedef struct ALXRRustCtx
 {
     void (*inputSend)(const TrackingInfo* data);
     void (*viewsConfigSend)(const ALXREyeInfo* eyeInfo);
@@ -119,6 +119,8 @@ struct ALXRRustCtx
     ALXRFacialExpressionType facialTracking;
     ALXREyeTrackingType eyeTracking;
 
+    uint16_t trackingServerPortNo;
+
     bool verbose;
     bool disableLinearizeSrgb;
     bool noSuggestedBindings;
@@ -134,7 +136,7 @@ struct ALXRRustCtx
     void* applicationVM;
     void* applicationActivity;
 #endif
-};
+} ALXRClientCtx;
 
 struct ALXRGuardianData {
     float areaWidth;

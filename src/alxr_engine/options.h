@@ -122,6 +122,8 @@ struct Options {
     ALXRFacialExpressionType FacialTracking = ALXRFacialExpressionType::Auto;
     ALXREyeTrackingType      EyeTracking = ALXREyeTrackingType::Auto;
 
+    std::uint16_t TrackingServerPortNo = 49192;
+
     XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_QUEST_FB;
     bool DisableLinearizeSrgb=false;
     bool DisableSuggestedBindings = false;

@@ -705,7 +705,7 @@ struct ShaderProgram {
 
         CHECK_VKCMD(vkCreateShaderModule(m_vkDevice, &modInfo, nullptr, &si.module));
 
-        Log::Write(Log::Level::Info, Fmt("Loaded %s shader", name.c_str()));
+        Log::Write(Log::Level::Verbose, Fmt("Loaded %s shader", name.c_str()));
     }
 };
 

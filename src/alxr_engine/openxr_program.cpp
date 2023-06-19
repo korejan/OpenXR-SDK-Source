@@ -442,16 +442,16 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-        if (eyeTracker_ != XR_NULL_HANDLE)
+        if (eyeTrackerFB_ != XR_NULL_HANDLE)
         {
             Log::Write(Log::Level::Verbose, "Destroying EyeTracker");
-            m_xrDestroyEyeTrackerFB_(eyeTracker_);
+            m_xrDestroyEyeTrackerFB_(eyeTrackerFB_);
         }
 
-        if (faceTracker_ != XR_NULL_HANDLE)
+        if (faceTrackerFB_ != XR_NULL_HANDLE)
         {
             Log::Write(Log::Level::Verbose, "Destroying FaceTracker");
-            m_xrDestroyFaceTrackerFB_(faceTracker_);
+            m_xrDestroyFaceTrackerFB_(faceTrackerFB_);
         }
 
         for (auto facialTracker : m_facialTrackersHTC) {
@@ -461,12 +461,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-        if (m_vrcftProxyServer != nullptr) {
-            Log::Write(Log::Level::Verbose, "Shutting Down Proxy Server");
-            m_vrcftProxyServer->Close();
-            m_vrcftProxyServer.reset();
-        }
-
+        m_vrcftProxyServer.reset();
+        
         m_interactionManager.reset();
 
         if (m_visualizedSpaces.size() > 0) {
@@ -1209,7 +1205,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
-    XrEyeTrackerFB eyeTracker_ = XR_NULL_HANDLE;
+    XrEyeTrackerFB eyeTrackerFB_ = XR_NULL_HANDLE;
     PFN_xrDestroyEyeTrackerFB m_xrDestroyEyeTrackerFB_ = nullptr;
     PFN_xrGetEyeGazesFB m_xrGetEyeGazesFB_ = nullptr;
 
@@ -1230,8 +1226,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             .type = XR_TYPE_SYSTEM_PROPERTIES,
             .next = &eyeTrackingSystemProperties
         };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        if (!eyeTrackingSystemProperties.supportsEyeTracking) {
+        if (XR_FAILED(xrGetSystemProperties(m_instance, m_systemId, &systemProperties)) ||
+            !eyeTrackingSystemProperties.supportsEyeTracking) {
             Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME));
             return false;
         }
@@ -1239,14 +1235,20 @@ struct OpenXrProgram final : IOpenXrProgram {
         // Acquire Function Pointers
         PFN_xrCreateEyeTrackerFB m_xrCreateEyeTrackerFB_ = nullptr;
 
-        CHECK_XRCMD(xrGetInstanceProcAddr(
-            m_instance, "xrCreateEyeTrackerFB", (PFN_xrVoidFunction*)(&m_xrCreateEyeTrackerFB_)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+        if (XR_FAILED(xrGetInstanceProcAddr(
+            m_instance, "xrCreateEyeTrackerFB", (PFN_xrVoidFunction*)(&m_xrCreateEyeTrackerFB_)))) {
+            m_xrCreateEyeTrackerFB_ = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrDestroyEyeTrackerFB",
-            (PFN_xrVoidFunction*)(&m_xrDestroyEyeTrackerFB_)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
-            m_instance, "xrGetEyeGazesFB", (PFN_xrVoidFunction*)(&m_xrGetEyeGazesFB_)));
+            (PFN_xrVoidFunction*)(&m_xrDestroyEyeTrackerFB_)))) {
+            m_xrDestroyEyeTrackerFB_ = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
+            m_instance, "xrGetEyeGazesFB", (PFN_xrVoidFunction*)(&m_xrGetEyeGazesFB_)))) {
+            m_xrGetEyeGazesFB_ = nullptr;
+        }
 
         if (m_xrCreateEyeTrackerFB_ == nullptr ||
             m_xrDestroyEyeTrackerFB_ == nullptr ||
@@ -1262,9 +1264,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             .type = XR_TYPE_EYE_TRACKER_CREATE_INFO_FB,
             .next = nullptr
         };
-        CHECK_XRCMD(m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTracker_));
-        CHECK(eyeTracker_ != XR_NULL_HANDLE);
-        return true;
+        return XR_SUCCEEDED(m_xrCreateEyeTrackerFB_(m_session, &createInfo, &eyeTrackerFB_)) && eyeTrackerFB_ != XR_NULL_HANDLE;
     }
 
     bool IsExtEyeGazeInteractionSupported() const {
@@ -1282,8 +1282,8 @@ struct OpenXrProgram final : IOpenXrProgram {
             .type = XR_TYPE_SYSTEM_PROPERTIES,
             .next = &eyeTrackingSystemProperties
         };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        return eyeTrackingSystemProperties.supportsEyeGazeInteraction == XR_TRUE;
+        return XR_SUCCEEDED(xrGetSystemProperties(m_instance, m_systemId, &systemProperties)) &&
+               eyeTrackingSystemProperties.supportsEyeGazeInteraction == XR_TRUE;
     }
 
     bool InitExtEyeGazeInteraction() {        
@@ -1302,13 +1302,13 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     bool IsEyeTrackingEnabled() const {
-        if (eyeTracker_ != XR_NULL_HANDLE)
+        if (eyeTrackerFB_ != XR_NULL_HANDLE)
             return true;
         return IsExtEyeGazeInteractionSupported();
     }
 
 
-    XrFaceTrackerFB faceTracker_ = XR_NULL_HANDLE;
+    XrFaceTrackerFB faceTrackerFB_ = XR_NULL_HANDLE;
     PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
     PFN_xrGetFaceExpressionWeightsFB m_xrGetFaceExpressionWeightsFB_ = nullptr;
 
@@ -1322,14 +1322,15 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         XrSystemFaceTrackingPropertiesFB faceTrackingSystemProperties{
             .type = XR_TYPE_SYSTEM_FACE_TRACKING_PROPERTIES_FB,
-            .next = nullptr
+            .next = nullptr,
+            .supportsFaceTracking = XR_FALSE
         };
         XrSystemProperties systemProperties{
             .type = XR_TYPE_SYSTEM_PROPERTIES,
             .next = &faceTrackingSystemProperties
         };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        if (!faceTrackingSystemProperties.supportsFaceTracking) {
+        if (XR_FAILED(xrGetSystemProperties(m_instance, m_systemId, &systemProperties)) ||
+            !faceTrackingSystemProperties.supportsFaceTracking) {
             Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
             return false;
         }
@@ -1337,18 +1338,24 @@ struct OpenXrProgram final : IOpenXrProgram {
         // Acquire Function Pointers
         PFN_xrCreateFaceTrackerFB m_xrCreateFaceTrackerFB_ = nullptr;
 
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrCreateFaceTrackerFB",
-            (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerFB_)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+            (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerFB_)))) {
+            m_xrCreateFaceTrackerFB_ = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrDestroyFaceTrackerFB",
-            (PFN_xrVoidFunction*)(&m_xrDestroyFaceTrackerFB_)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+            (PFN_xrVoidFunction*)(&m_xrDestroyFaceTrackerFB_)))) {
+            m_xrDestroyFaceTrackerFB_ = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrGetFaceExpressionWeightsFB",
-            (PFN_xrVoidFunction*)(&m_xrGetFaceExpressionWeightsFB_)));
+            (PFN_xrVoidFunction*)(&m_xrGetFaceExpressionWeightsFB_)))) {
+            m_xrGetFaceExpressionWeightsFB_ = nullptr;
+        }
 
         if (m_xrCreateFaceTrackerFB_ == nullptr ||
             m_xrDestroyFaceTrackerFB_ == nullptr ||
@@ -1359,15 +1366,13 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_FB_FACE_TRACKING_EXTENSION_NAME));
         
-        faceTracker_ = XR_NULL_HANDLE;
+        faceTrackerFB_ = XR_NULL_HANDLE;
         constexpr const XrFaceTrackerCreateInfoFB createInfo {
             .type = XR_TYPE_FACE_TRACKER_CREATE_INFO_FB,
             .next = nullptr,
             .faceExpressionSet = XR_FACE_EXPRESSSION_SET_DEFAULT_FB
         };
-        CHECK_XRCMD(m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTracker_));
-        CHECK(faceTracker_ != XR_NULL_HANDLE);
-        return true;
+        return XR_SUCCEEDED(m_xrCreateFaceTrackerFB_(m_session, &createInfo, &faceTrackerFB_)) && faceTrackerFB_ != XR_NULL_HANDLE;
     }
 
     std::array<XrFacialTrackerHTC, 2> m_facialTrackersHTC{ XR_NULL_HANDLE, XR_NULL_HANDLE };
@@ -1393,27 +1398,33 @@ struct OpenXrProgram final : IOpenXrProgram {
             .type = XR_TYPE_SYSTEM_PROPERTIES,
             .next = &faceTrackingSystemProperties
         };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        if (!faceTrackingSystemProperties.supportEyeFacialTracking &&
-            !faceTrackingSystemProperties.supportLipFacialTracking) {
+        if (XR_FAILED(xrGetSystemProperties(m_instance, m_systemId, &systemProperties)) ||
+            !(faceTrackingSystemProperties.supportEyeFacialTracking ||
+              faceTrackingSystemProperties.supportLipFacialTracking)) {
             Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_HTC_FACIAL_TRACKING_EXTENSION_NAME));
             return false;
         }
 
         PFN_xrCreateFacialTrackerHTC m_xrCreateFaceTrackerHTC = nullptr;
 
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrCreateFacialTrackerHTC",
-            (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerHTC)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+            (PFN_xrVoidFunction*)(&m_xrCreateFaceTrackerHTC)))) {
+            m_xrCreateFaceTrackerHTC = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrDestroyFacialTrackerHTC",
-            (PFN_xrVoidFunction*)(&m_xrDestroyFacialTrackerHTC)));
-        CHECK_XRCMD(xrGetInstanceProcAddr(
+            (PFN_xrVoidFunction*)(&m_xrDestroyFacialTrackerHTC)))) {
+            m_xrDestroyFacialTrackerHTC = nullptr;
+        }
+        if (XR_FAILED(xrGetInstanceProcAddr(
             m_instance,
             "xrGetFacialExpressionsHTC",
-            (PFN_xrVoidFunction*)(&m_xrGetFacialExpressionsHTC)));
+            (PFN_xrVoidFunction*)(&m_xrGetFacialExpressionsHTC)))) {
+            m_xrGetFacialExpressionsHTC = nullptr;
+        }
 
         if (m_xrCreateFaceTrackerHTC == nullptr ||
             m_xrDestroyFacialTrackerHTC == nullptr ||
@@ -1461,7 +1472,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     bool IsFacialTrackingEnabled() const {
-        if (faceTracker_ != XR_NULL_HANDLE)
+        if (faceTrackerFB_ != XR_NULL_HANDLE)
             return true;
         return std::any_of(
             m_facialTrackersHTC.begin(), m_facialTrackersHTC.end(),
@@ -1470,8 +1481,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     std::unique_ptr<ALXR::VRCFT::Server> m_vrcftProxyServer{};
-    bool m_sendVRCFTHandShakeMsg = true;
-
+    
     bool InitializeProxyServer()
     {
         if (m_options && m_options->NoFTServer) {
@@ -1486,9 +1496,10 @@ struct OpenXrProgram final : IOpenXrProgram {
             return false;
         }
 
-        m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>();
+        const std::uint16_t portNo = m_options != nullptr ?
+            m_options->TrackingServerPortNo : ALXR::VRCFT::Server::DefaultPortNo;
+        m_vrcftProxyServer = std::make_unique<ALXR::VRCFT::Server>(portNo);
         assert(m_vrcftProxyServer != nullptr);
-        m_vrcftProxyServer->SetOnNewConnection([this]() { m_sendVRCFTHandShakeMsg = true; });
         Log::Write(Log::Level::Info, "FacialEye Tracking proxy server created.");
         return true;
     }
@@ -3135,7 +3146,7 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     static_assert(XR_FACE_EXPRESSION_COUNT_FB <= MaxExpressionCount);
-    float confidence_[XR_FACE_CONFIDENCE_COUNT_FB] = {};
+    std::array<float, XR_FACE_EXPRESSION_COUNT_FB> m_confidences {};
 
     inline void PollFaceEyeTracking(const XrTime& ptime, ALXRFacialEyePacket& newPacket)
     {
@@ -3165,7 +3176,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         if (noOptions || m_options->IsSelected(ALXRFacialExpressionType::FB))
         {
-            if (faceTracker_ != XR_NULL_HANDLE) {
+            if (faceTrackerFB_ != XR_NULL_HANDLE) {
                 const XrFaceExpressionInfoFB expressionInfo{
                     .type = XR_TYPE_FACE_EXPRESSION_INFO_FB,
                     .next = nullptr,
@@ -3177,10 +3188,10 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .weightCount = XR_FACE_EXPRESSION_COUNT_FB,
                     .weights = newPacket.expressionWeights,
                     .confidenceCount = XR_FACE_CONFIDENCE_COUNT_FB,
-                    .confidences = confidence_
+                    .confidences = m_confidences.data()
                 };
-                assert(faceTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-                m_xrGetFaceExpressionWeightsFB_(faceTracker_, &expressionInfo, &expressionWeights);
+                assert(faceTrackerFB_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+                m_xrGetFaceExpressionWeightsFB_(faceTrackerFB_, &expressionInfo, &expressionWeights);
 
                 newPacket.isEyeFollowingBlendshapesValid = static_cast<std::uint8_t>(expressionWeights.status.isEyeFollowingBlendshapesValid);
                 newPacket.expressionType = ALXRFacialExpressionType::FB;
@@ -3205,7 +3216,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         if (noOptions || m_options->IsSelected(ALXREyeTrackingType::FBEyeTrackingSocial))
         {
-            if (eyeTracker_ != XR_NULL_HANDLE) {
+            if (eyeTrackerFB_ != XR_NULL_HANDLE) {
                 const XrEyeGazesInfoFB gazesInfo{
                     .type = XR_TYPE_EYE_GAZES_INFO_FB,
                     .next = nullptr,
@@ -3216,8 +3227,8 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .type = XR_TYPE_EYE_GAZES_FB,
                     .next = nullptr
                 };
-                assert(eyeTracker_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
-                m_xrGetEyeGazesFB_(eyeTracker_, &gazesInfo, &eyeGazes);
+                assert(eyeTrackerFB_ != XR_NULL_HANDLE && m_xrGetFaceExpressionWeightsFB_ != nullptr);
+                m_xrGetEyeGazesFB_(eyeTrackerFB_, &gazesInfo, &eyeGazes);
 
                 newPacket.eyeTrackerType = ALXREyeTrackingType::FBEyeTrackingSocial;
                 for (std::size_t idx = 0; idx < MaxEyeCount; ++idx) {
@@ -3227,7 +3238,6 @@ struct OpenXrProgram final : IOpenXrProgram {
                 }
             }
         }
-
     }
 
     ALXRFacialEyePacket newFTPacket{
@@ -3238,14 +3248,11 @@ struct OpenXrProgram final : IOpenXrProgram {
     };
     void PollFaceEyeTracking(const XrTime& ptime)
     {
-        if (m_vrcftProxyServer == nullptr || ptime == 0)
+        if (ptime == 0 || m_vrcftProxyServer == nullptr ||
+            !m_vrcftProxyServer->IsConnected())
             return;
         PollFaceEyeTracking(ptime, newFTPacket);
-        assert(m_vrcftProxyServer != nullptr);
-        m_vrcftProxyServer->PollOne();
-        if (m_vrcftProxyServer->IsConnected()) {
-            m_vrcftProxyServer->Send(newFTPacket);
-        }
+        m_vrcftProxyServer->SendAsync(newFTPacket);
     }
 
     virtual inline void PollFaceEyeTracking(ALXRFacialEyePacket& newPacket) override
