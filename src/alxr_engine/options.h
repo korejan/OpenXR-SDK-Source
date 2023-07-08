@@ -119,7 +119,9 @@ struct Options {
 
     FirmwareVersion firmwareVersion{};
 
-    ALXRFacialExpressionType FacialTracking = ALXRFacialExpressionType::Auto;
+    ALXRFacialExpressionType EyeExpressionType = ALXRFacialExpressionType::Auto;
+    ALXRFacialExpressionType LowerFaceExpressionType = ALXRFacialExpressionType::Auto;
+    ALXRFacialExpressionType FacialTracking = ALXRFacialExpressionType::Auto;    
     ALXREyeTrackingType      EyeTracking = ALXREyeTrackingType::Auto;
 
     XrColorSpaceFB DisplayColorSpace = XR_COLOR_SPACE_QUEST_FB;
@@ -167,6 +169,14 @@ struct Options {
     void SetEnvironmentBlendMode(XrEnvironmentBlendMode environmentBlendMode) {
         EnvironmentBlendMode = GetXrEnvironmentBlendModeStr(environmentBlendMode);
         Parsed.EnvironmentBlendMode = environmentBlendMode;
+    }
+
+    inline bool IsEyeExprSelected(const ALXRFacialExpressionType t) const {
+        return EyeExpressionType == ALXRFacialExpressionType::Auto || EyeExpressionType == t;
+    }
+
+    inline bool IsLowerFaceExprSelected(const ALXRFacialExpressionType t) const {
+        return LowerFaceExpressionType == ALXRFacialExpressionType::Auto || LowerFaceExpressionType == t;
     }
 
     inline bool IsSelected(const ALXRFacialExpressionType t) const {

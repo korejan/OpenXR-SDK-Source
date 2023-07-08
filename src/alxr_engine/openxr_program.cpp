@@ -3129,9 +3129,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         const bool noOptions = m_options == nullptr;
         if (noOptions || m_options->IsSelected(ALXRFacialExpressionType::HTC))
         {
-            for (const auto& [facialTracker, exprCount, offset] : {
-                    std::make_tuple(m_facialTrackersHTC[0], XR_FACIAL_EXPRESSION_EYE_COUNT_HTC, 0),
-                    std::make_tuple(m_facialTrackersHTC[1], XR_FACIAL_EXPRESSION_LIP_COUNT_HTC, XR_FACIAL_EXPRESSION_EYE_COUNT_HTC)
+            for (const auto& [facialTracker, exprCount, expressionWeights] : {
+                    std::make_tuple(m_facialTrackersHTC[0], XR_FACIAL_EXPRESSION_EYE_COUNT_HTC, newPacket.eyeExpressionWeights),
+                    std::make_tuple(m_facialTrackersHTC[1], XR_FACIAL_EXPRESSION_LIP_COUNT_HTC, newPacket.lowerFaceExpressionWeights)
                 })
             {
                 if (facialTracker == XR_NULL_HANDLE)
@@ -3142,7 +3142,7 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .isActive = XR_FALSE,
                     .sampleTime = ptime,
                     .expressionCount = static_cast<std::uint32_t>(exprCount),
-                    .expressionWeightings = newPacket.expressionWeights + offset
+                    .expressionWeightings = expressionWeights
                 };
                 if (XR_FAILED(m_xrGetFacialExpressionsHTC(facialTracker, &xrFacialExpr)))
                     continue;
@@ -3217,7 +3217,8 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     ALXRFacialEyePacket newFTPacket{
-        .expressionType = ALXRFacialExpressionType::None,
+        .eyeExpressionType = ALXRFacialExpressionType::None,
+        .lowerFaceExpressionType = ALXRFacialExpressionType::None,
         .eyeTrackerType = ALXREyeTrackingType::None,
         .isEyeFollowingBlendshapesValid = 0,
         .isEyeGazePoseValid { 0,0 },
