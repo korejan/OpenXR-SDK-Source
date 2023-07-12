@@ -55,8 +55,6 @@
 
 //#define ALXR_ENGINE_ENABLE_VIZ_SPACES
 
-constexpr inline const std::uint16_t FT_ET_PROXY_PORT = 13191;
-
 namespace {
 #if !defined(XR_USE_PLATFORM_WIN32)
 #define strcpy_s(dest, source) strncpy((dest), (source), sizeof(dest))
