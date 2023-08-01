@@ -78,6 +78,13 @@ enum class ALXRColorSpace : int32_t  {
     MaxEnum = 0x7fffffff
 };
 
+enum ALXRTrackingEnabledFlags : uint64_t {
+    ALXR_TRACKING_ENABLED_HANDS = (1u << 0),
+    ALXR_TRACKING_ENABLED_EYES  = (1u << 1),
+    ALXR_TRACKING_ENABLED_FACE  = (1u << 2),    
+    ALXR_TRACKING_ENABLED_ALL = ALXR_TRACKING_ENABLED_HANDS | ALXR_TRACKING_ENABLED_EYES | ALXR_TRACKING_ENABLED_FACE
+};
+
 struct ALXRSystemProperties
 {
     char         systemName[256];
@@ -86,6 +93,7 @@ struct ALXRSystemProperties
     uint32_t refreshRatesCount;
     uint32_t recommendedEyeWidth;
     uint32_t recommendedEyeHeight;
+    uint64_t enabledTrackingSystemsFlags;
 };
 
 struct ALXREyeInfo

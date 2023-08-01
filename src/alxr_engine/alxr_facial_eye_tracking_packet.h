@@ -19,8 +19,8 @@
 extern "C" {;
 #endif
 
-constexpr static const std::size_t MaxEyeCount = 2;
-constexpr static const std::size_t MaxExpressionCount = 63;
+inline constexpr const std::size_t MaxEyeCount = 2;
+inline constexpr const std::size_t MaxExpressionCount = 63;
 static_assert((XR_FACIAL_EXPRESSION_LIP_COUNT_HTC + XR_FACIAL_EXPRESSION_EYE_COUNT_HTC) <= MaxExpressionCount);
 #ifdef XR_USE_OXR_OCULUS
     static_assert(XR_FACE_EXPRESSION_COUNT_FB <= MaxExpressionCount);
@@ -37,10 +37,49 @@ struct ALXRFacialEyePacket {
 };
 #pragma pack(pop)
 
+enum ALXRSpaceLocationFlags : uint64_t {
+    ALXR_SPACE_LOCATION_ORIENTATION_VALID_BIT   = 0x00000001,
+    ALXR_SPACE_LOCATION_POSITION_VALID_BIT      = 0x00000002,
+    ALXR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT = 0x00000004,
+    ALXR_SPACE_LOCATION_POSITION_TRACKED_BIT    = 0x00000008
+};
+
+enum ALXRSpaceVelocityFlags : uint64_t {
+    ALXR_SPACE_VELOCITY_LINEAR_VALID_BIT  = 0x00000001,
+    ALXR_SPACE_VELOCITY_ANGULAR_VALID_BIT = 0x00000002
+};
+
+typedef struct ALXRHandJointLocation {
+    ALXRSpaceLocationFlags locationFlags;
+    ALXRPosef              pose;
+    float                  radius;
+} ALXRHandJointLocation;
+
+typedef struct ALXRHandJointVelocity {
+    ALXRSpaceVelocityFlags  velocityFlags;
+    ALXRVector3f            linearVelocity;
+    ALXRVector3f            angularVelocity;
+} ALXRHandJointVelocity;
+
+inline constexpr const std::size_t MaxHandJointCount = 26;
+
+typedef struct ALXRHandJointLocations {
+    ALXRHandJointLocation jointLocations[MaxHandJointCount];
+    ALXRHandJointVelocity jointVelocities[MaxHandJointCount];
+    bool                  isActive;
+} ALXRHandJointLocations;
+
+inline constexpr const std::size_t MaxHandCount = 2;
+
+typedef struct ALXRHandTracking {
+    ALXRHandJointLocations hands[MaxHandCount];
+} ALXRHandTracking;
+
 struct ALXRProcessFrameResult {
-    ALXRFacialEyePacket* newPacket;
-    bool                 exitRenderLoop;
-    bool                 requestRestart;
+    ALXRHandTracking    handTracking;
+    ALXRFacialEyePacket facialEyeTracking;
+    bool                exitRenderLoop;
+    bool                requestRestart;
 };
 DLLEXPORT void alxr_process_frame2(ALXRProcessFrameResult* result);
 

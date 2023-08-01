@@ -250,9 +250,8 @@ void alxr_process_frame2(ALXRProcessFrameResult* frameResult) {
             gProgram->RenderFrame();
         }
 
-        if (frameResult->newPacket) {
-            gProgram->PollFaceEyeTracking(*frameResult->newPacket);
-        }
+        gProgram->PollHandTracking(frameResult->handTracking);
+        gProgram->PollFaceEyeTracking(frameResult->facialEyeTracking);
 
     } catch (const std::exception& ex) {
         frameResult->exitRenderLoop = true;

@@ -434,7 +434,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         {
             Log::Write(Log::Level::Verbose, "Destroying HandTrackers");
             assert(m_pfnCreateHandTrackerEXT != nullptr);
-            for (auto& handTracker : m_input.handerTrackers) {
+            for (auto& handTracker : m_input.handTrackers) {
                 if (handTracker.tracker != XR_NULL_HANDLE) {
                     m_pfnDestroyHandTrackerEXT(handTracker.tracker);
                     handTracker.tracker = XR_NULL_HANDLE;
@@ -707,11 +707,10 @@ struct OpenXrProgram final : IOpenXrProgram {
             if (m_options == nullptr)
                 return {};
             return {
-                { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        IsPrePicoPUI<5,7>() },
+                { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        m_options->NoHandTracking || IsPrePicoPUI<5,7>() },
                 { XR_MND_HEADLESS_EXTENSION_NAME,             !m_options->HeadlessSession },
                 { XR_FB_PASSTHROUGH_EXTENSION_NAME,           m_options->NoPassthrough },
                 { XR_HTC_PASSTHROUGH_EXTENSION_NAME,          m_options->NoPassthrough },
-                { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        m_options->NoHandTracking },
                 { XR_HTC_FACIAL_TRACKING_EXTENSION_NAME,      !m_options->IsSelected(ALXRFacialExpressionType::HTC) },
                 { XR_FB_FACE_TRACKING_EXTENSION_NAME,         !m_options->IsSelected(ALXRFacialExpressionType::FB) },
                 { XR_FB_EYE_TRACKING_SOCIAL_EXTENSION_NAME,   !m_options->IsSelected(ALXREyeTrackingType::FBEyeTrackingSocial) },
@@ -1301,12 +1300,11 @@ struct OpenXrProgram final : IOpenXrProgram {
         return InitExtEyeGazeInteraction();
     }
 
-    bool IsEyeTrackingEnabled() const {
+    bool IsEyeTrackingEnabled() const override {
         if (eyeTrackerFB_ != XR_NULL_HANDLE)
             return true;
         return IsExtEyeGazeInteractionSupported();
     }
-
 
     XrFaceTrackerFB faceTrackerFB_ = XR_NULL_HANDLE;
     PFN_xrDestroyFaceTrackerFB m_xrDestroyFaceTrackerFB_ = nullptr;
@@ -1471,7 +1469,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         return InitializeHTCFacialTracker();
     }
 
-    bool IsFacialTrackingEnabled() const {
+    bool IsFacialTrackingEnabled() const override {
         if (faceTrackerFB_ != XR_NULL_HANDLE)
             return true;
         return std::any_of(
@@ -1522,24 +1520,30 @@ struct OpenXrProgram final : IOpenXrProgram {
             .supportsHandTracking = XR_FALSE
         };
         XrSystemProperties systemProperties{ .type=XR_TYPE_SYSTEM_PROPERTIES, .next = &handTrackingSystemProperties };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &systemProperties));
-        if (!handTrackingSystemProperties.supportsHandTracking) {
+        if (XR_FAILED(xrGetSystemProperties(m_instance, m_systemId, &systemProperties)) ||
+            handTrackingSystemProperties.supportsHandTracking == XR_FALSE) {
             Log::Write(Log::Level::Warning, Fmt("%s is not enabled/supported.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
             // The system does not support hand tracking
             return false;
         }
 
         // Get function pointer for xrCreateHandTrackerEXT
-        CHECK_XRCMD(xrGetInstanceProcAddr(m_instance, "xrCreateHandTrackerEXT",
-            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnCreateHandTrackerEXT)));
+        if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrCreateHandTrackerEXT",
+            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnCreateHandTrackerEXT)))) {
+            m_pfnCreateHandTrackerEXT = nullptr;
+        }
 
         // Get function pointer for xrLocateHandJointsEXT
-        CHECK_XRCMD(xrGetInstanceProcAddr(m_instance, "xrLocateHandJointsEXT",
-            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnLocateHandJointsEXT)));
+        if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrLocateHandJointsEXT",
+            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnLocateHandJointsEXT)))) {
+            m_pfnLocateHandJointsEXT = nullptr;
+        }
 
         // Get function pointer for xrLocateHandJointsEXT
-        CHECK_XRCMD(xrGetInstanceProcAddr(m_instance, "xrDestroyHandTrackerEXT",
-            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnDestroyHandTrackerEXT)));
+        if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrDestroyHandTrackerEXT",
+            reinterpret_cast<PFN_xrVoidFunction*>(&m_pfnDestroyHandTrackerEXT)))) {
+            m_pfnDestroyHandTrackerEXT = nullptr;
+        }
 
         if (m_pfnCreateHandTrackerEXT == nullptr ||
             m_pfnLocateHandJointsEXT == nullptr ||
@@ -1551,7 +1555,7 @@ struct OpenXrProgram final : IOpenXrProgram {
         Log::Write(Log::Level::Info, Fmt("%s is enabled.", XR_EXT_HAND_TRACKING_EXTENSION_NAME));
 
         // Create a hand tracker for left hand that tracks default set of hand joints.
-        const auto createHandTracker = [&](auto& handerTracker, const XrHandEXT hand)
+        const auto createHandTracker = [&](auto& handTracker, const XrHandEXT hand)
         {
             const XrHandTrackerCreateInfoEXT createInfo{
                 .type = XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT,
@@ -1559,19 +1563,30 @@ struct OpenXrProgram final : IOpenXrProgram {
                 .hand = hand,
                 .handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT
             };
-            CHECK_XRCMD(m_pfnCreateHandTrackerEXT(m_session, &createInfo, &handerTracker.tracker));
+            if (XR_FAILED(m_pfnCreateHandTrackerEXT(m_session, &createInfo, &handTracker.tracker))) {
+                handTracker.tracker = XR_NULL_HANDLE;
+                Log::Write(Log::Level::Error, Fmt("Failed to create hand tracker for %s hand.", hand == XR_HAND_LEFT_EXT ? "left" : "right"));
+            }
         };
-        createHandTracker(m_input.handerTrackers[0], XR_HAND_LEFT_EXT);
-        createHandTracker(m_input.handerTrackers[1], XR_HAND_RIGHT_EXT);
+        createHandTracker(m_input.handTrackers[0], XR_HAND_LEFT_EXT);
+        createHandTracker(m_input.handTrackers[1], XR_HAND_RIGHT_EXT);
 
-        auto& leftHandBaseOrientation = m_input.handerTrackers[0].baseOrientation;
-        auto& rightHandBaseOrientation = m_input.handerTrackers[1].baseOrientation;   
+        auto& leftHandBaseOrientation = m_input.handTrackers[0].baseOrientation;
+        auto& rightHandBaseOrientation = m_input.handTrackers[1].baseOrientation;   
         XrMatrix4x4f zRot;
         XrMatrix4x4f& yRot = rightHandBaseOrientation;
         XrMatrix4x4f_CreateRotation(&yRot, 0.0, -90.0f, 0.0f);
         XrMatrix4x4f_CreateRotation(&zRot, 0.0, 0.0f, 180.0f);
         XrMatrix4x4f_Multiply(&leftHandBaseOrientation, &yRot, &zRot);
         return true;
+    }
+
+    bool IsHandTrackingEnabled() const override {
+        for (const auto& handTracker : m_input.handTrackers) {
+            if (handTracker.tracker != XR_NULL_HANDLE)
+                return true;
+        }
+        return false;
     }
 
     bool InitializeFBPassthroughAPI()
@@ -2302,19 +2317,22 @@ struct OpenXrProgram final : IOpenXrProgram {
             if (isHandOnControllerPose && controller.enabled)
                 continue;
 
-            auto& handerTracker = m_input.handerTrackers[hand];
+            auto& handTracker = m_input.handTrackers[hand];
+            if (handTracker.tracker == XR_NULL_HANDLE)
+                continue;
+
             //XrHandJointVelocitiesEXT velocities {
             //    .type = XR_TYPE_HAND_JOINT_VELOCITIES_EXT,
             //    .next = nullptr,
             //    .jointCount = XR_HAND_JOINT_COUNT_EXT,
-            //    .jointVelocities = handerTracker.jointVelocities.data(),
+            //    .jointVelocities = handTracker.jointVelocities.data(),
             //};
             XrHandJointLocationsEXT locations {
                 .type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
                 .next = nullptr, //&velocities,
                 .isActive = XR_FALSE,
                 .jointCount = XR_HAND_JOINT_COUNT_EXT,
-                .jointLocations = handerTracker.jointLocations.data(),
+                .jointLocations = handTracker.jointLocations.data(),
             };
             const XrHandJointsLocateInfoEXT locateInfo{
                 .type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
@@ -2322,12 +2340,12 @@ struct OpenXrProgram final : IOpenXrProgram {
                 .baseSpace = m_appSpace,
                 .time = time
             };
-            if (XR_FAILED(m_pfnLocateHandJointsEXT(handerTracker.tracker, &locateInfo, &locations)) ||
+            if (XR_FAILED(m_pfnLocateHandJointsEXT(handTracker.tracker, &locateInfo, &locations)) ||
                 locations.isActive == XR_FALSE)
                 continue;
 
-            const auto& jointLocations = handerTracker.jointLocations;
-            const auto& handBaseOrientation = handerTracker.baseOrientation;
+            const auto& jointLocations = handTracker.jointLocations;
+            const auto& handBaseOrientation = handTracker.baseOrientation;
             for (size_t jointIdx = 0; jointIdx < XR_HAND_JOINT_COUNT_EXT; ++jointIdx)
             {
                 const auto& jointLoc = jointLocations[jointIdx];
@@ -2383,6 +2401,51 @@ struct OpenXrProgram final : IOpenXrProgram {
             controller.linearVelocity  = { 0,0,0 };
             controller.angularVelocity = { 0,0,0 };
         }
+    }
+
+    void PollHandTracking(const XrTime& time, ALXRHandTracking& handTrackingData) {
+
+        static_assert(sizeof(ALXRHandJointLocation) == sizeof(XrHandJointLocationEXT));
+        static_assert(sizeof(ALXRHandJointVelocity) == sizeof(XrHandJointVelocityEXT));
+        static_assert(MaxHandJointCount == XR_HAND_JOINT_COUNT_EXT);
+
+        for (const auto hand : { Side::LEFT,Side::RIGHT })
+        {
+            auto& handData = handTrackingData.hands[hand];
+            handData.isActive = false;
+            if (time == 0 || m_pfnLocateHandJointsEXT == nullptr)
+                continue;
+
+            auto& handTracker = m_input.handTrackers[hand];
+            if (handTracker.tracker == XR_NULL_HANDLE)
+                continue;
+
+            XrHandJointVelocitiesEXT velocities{
+                .type = XR_TYPE_HAND_JOINT_VELOCITIES_EXT,
+                .next = nullptr,
+                .jointCount = XR_HAND_JOINT_COUNT_EXT,
+                .jointVelocities = reinterpret_cast<XrHandJointVelocityEXT*>(&handData.jointVelocities[0]),
+            };
+            XrHandJointLocationsEXT locations{
+                .type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
+                .next = &velocities,
+                .isActive = XR_FALSE,
+                .jointCount = XR_HAND_JOINT_COUNT_EXT,
+                .jointLocations = reinterpret_cast<XrHandJointLocationEXT*>(&handData.jointLocations[0]),
+            };
+            const XrHandJointsLocateInfoEXT locateInfo{
+                .type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
+                .next = nullptr,
+                .baseSpace = m_appSpace,
+                .time = time
+            };
+            handData.isActive = XR_SUCCEEDED(m_pfnLocateHandJointsEXT(handTracker.tracker, &locateInfo, &locations)) &&
+                locations.isActive == XR_TRUE;
+        }
+    }
+
+    void PollHandTracking(ALXRHandTracking& handTrackingData) override {
+        PollHandTracking(m_lastPredicatedDisplayTime, handTrackingData);
     }
 
     void PollActions() override {
@@ -2601,13 +2664,13 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         for (const auto hand : { Side::LEFT,Side::RIGHT }) {
 
-            auto& handerTracker = m_input.handerTrackers[hand];
+            auto& handTracker = m_input.handTrackers[hand];
             XrHandJointLocationsEXT locations{
                 .type = XR_TYPE_HAND_JOINT_LOCATIONS_EXT,
                 .next = nullptr, //&velocities,
                 .isActive = XR_FALSE,
                 .jointCount = XR_HAND_JOINT_COUNT_EXT,
-                .jointLocations = handerTracker.jointLocations.data(),
+                .jointLocations = handTracker.jointLocations.data(),
             };
             const XrHandJointsLocateInfoEXT locateInfo{
                 .type = XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT,
@@ -2615,11 +2678,11 @@ struct OpenXrProgram final : IOpenXrProgram {
                 .baseSpace = m_appSpace,
                 .time = predictedDisplayTime
             };
-            if (XR_FAILED(m_pfnLocateHandJointsEXT(handerTracker.tracker, &locateInfo, &locations)) ||
+            if (XR_FAILED(m_pfnLocateHandJointsEXT(handTracker.tracker, &locateInfo, &locations)) ||
                 locations.isActive == XR_FALSE)
                 continue;
 
-            const auto& jointLocations = handerTracker.jointLocations;
+            const auto& jointLocations = handTracker.jointLocations;
             for (size_t jointIdx = 0; jointIdx < XR_HAND_JOINT_COUNT_EXT; ++jointIdx)
             {
                 const auto& jointLoc = jointLocations[jointIdx];
@@ -2950,7 +3013,9 @@ struct OpenXrProgram final : IOpenXrProgram {
         if (m_instance == XR_NULL_HANDLE)
             return false;
         XrSystemProperties xrSystemProps = { .type=XR_TYPE_SYSTEM_PROPERTIES, .next=nullptr };
-        CHECK_XRCMD(xrGetSystemProperties(m_instance, m_systemId, &xrSystemProps));
+        if (XR_FAILED(xrGetSystemProperties(m_instance, m_systemId, &xrSystemProps))) {
+            return false;
+        }
         std::strncpy(systemProps.systemName, xrSystemProps.systemName, sizeof(systemProps.systemName));
         if (m_configViews.size() > 0)
         {
@@ -2962,8 +3027,23 @@ struct OpenXrProgram final : IOpenXrProgram {
         systemProps.refreshRates = m_displayRefreshRates.data();
         systemProps.refreshRatesCount = static_cast<std::uint32_t>(m_displayRefreshRates.size());
         systemProps.currentRefreshRate = m_displayRefreshRates.back();
-        if (m_pfnGetDisplayRefreshRateFB)
-            CHECK_XRCMD(m_pfnGetDisplayRefreshRateFB(m_session, &systemProps.currentRefreshRate));
+        if (m_pfnGetDisplayRefreshRateFB) {
+            if (XR_FAILED(m_pfnGetDisplayRefreshRateFB(m_session, &systemProps.currentRefreshRate))) {
+                Log::Write(Log::Level::Warning, "Failed to obtain current refresh rate from runtime.");
+            }
+        }
+
+        std::uint64_t trackingEnabledFlags = 0llu;
+        if (IsHandTrackingEnabled()) {
+            trackingEnabledFlags |= ALXR_TRACKING_ENABLED_HANDS;
+        }
+        if (IsEyeTrackingEnabled()) {
+            trackingEnabledFlags |= ALXR_TRACKING_ENABLED_EYES;
+        }
+        if (IsFacialTrackingEnabled()) {
+            trackingEnabledFlags |= ALXR_TRACKING_ENABLED_FACE;
+        }
+        systemProps.enabledTrackingSystemsFlags = trackingEnabledFlags;
         return true;
     }
 
@@ -3473,7 +3553,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             XrMatrix4x4f baseOrientation;
             XrHandTrackerEXT tracker{ XR_NULL_HANDLE };
         };
-        std::array<HandTrackerData, Side::COUNT> handerTrackers;
+        std::array<HandTrackerData, Side::COUNT> handTrackers;
         std::array<ALXRTrackingInfo::Controller, Side::COUNT> controllerInfo{};
     };
     InputState m_input{};
