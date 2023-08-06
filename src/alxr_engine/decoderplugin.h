@@ -63,7 +63,7 @@ public:
 };
 
 struct VideoFrame;
-struct ALXRRustCtx;
+struct ALXRClientCtx;
 struct IOpenXrProgram;
 
 struct IDecoderPlugin {
@@ -78,11 +78,11 @@ struct IDecoderPlugin {
     using shared_bool = std::atomic<bool>;
     struct RunCtx {
         using IOpenXrProgramPtr = std::shared_ptr<IOpenXrProgram>;
-        using RustCtxPtr = std::shared_ptr<const ALXRRustCtx>;
+        using ClientCtxPtr = std::shared_ptr<const ALXRClientCtx>;
 
         OptionMap         optionMap;
         ALXRDecoderConfig config;
-        RustCtxPtr        rustCtx;
+        ClientCtxPtr      clientCtx;
         IOpenXrProgramPtr programPtr;
         ALXRDecoderType   decoderType;
     };

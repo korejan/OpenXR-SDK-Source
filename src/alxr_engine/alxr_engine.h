@@ -17,7 +17,7 @@
 extern "C" {;
 #endif
 
-DLLEXPORT bool alxr_init(const ALXRRustCtx*, /*[out]*/ ALXRSystemProperties* systemProperties);
+DLLEXPORT bool alxr_init(const ALXRClientCtx*, /*[out]*/ ALXRSystemProperties* systemProperties);
 DLLEXPORT void alxr_destroy();
 DLLEXPORT void alxr_request_exit_session();
 DLLEXPORT void alxr_process_frame(bool* exitRenderLoop /*= non-null */, bool* requestRestart /*= non-null */);

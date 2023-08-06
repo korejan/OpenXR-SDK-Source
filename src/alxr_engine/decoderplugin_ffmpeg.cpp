@@ -236,7 +236,7 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
     using AVPacketQueue = moodycamel::BlockingReaderWriterCircularBuffer<NALPacket>;
     using GraphicsPluginPtr = std::shared_ptr<IGraphicsPlugin>;
     using IOpenXrProgramPtr = std::shared_ptr<IOpenXrProgram>;
-    using RustCtxPtr = std::shared_ptr<const ALXRRustCtx>;
+    using ALXRClientCtxPtr  = std::shared_ptr<const ALXRClientCtx>;
 
     AVPacketQueue/*Ptr*/ m_avPacketQueue;
     AVPixelFormat        m_hwPixFmt = AV_PIX_FMT_NONE;
@@ -466,8 +466,8 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
                 Log::Write(Log::Level::Verbose, Fmt("Pixel Format: %lu", pixFmt));
                 std::invoke(CreateVideoTextures, graphicsPluginPtr, avFrame->width, avFrame->height, pixFmt);
 
-                if (const auto rustCtx = ctx.rustCtx) {
-                    rustCtx->setWaitingNextIDR(false);
+                if (const auto clientCtx = ctx.clientCtx) {
+                    clientCtx->setWaitingNextIDR(false);
                     if (const auto programPtr = ctx.programPtr) {
                         programPtr->SetRenderMode(IOpenXrProgram::RenderMode::VideoStream);
                     }

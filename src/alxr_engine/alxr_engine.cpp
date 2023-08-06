@@ -45,9 +45,9 @@ constexpr inline const ALXREyeInfo EyeInfoZero {
 };
 
 using IOpenXrProgramPtr = std::shared_ptr<IOpenXrProgram>;
-using RustCtxPtr = std::shared_ptr<const ALXRRustCtx>;
+using ClientCtxPtr = std::shared_ptr<const ALXRClientCtx>;
 
-RustCtxPtr        gRustCtx{ nullptr };
+ClientCtxPtr      gClientCtx{ nullptr };
 IOpenXrProgramPtr gProgram{ nullptr };
 XrDecoderThread   gDecoderThread{};
 std::mutex        gRenderMutex{};
@@ -82,7 +82,7 @@ constexpr inline auto graphics_api_str(const ALXRGraphicsApi gcp)
     }
 }
 
-constexpr inline bool is_valid(const ALXRRustCtx& rCtx)
+constexpr inline bool is_valid(const ALXRClientCtx& rCtx)
 {
     return  rCtx.inputSend != nullptr &&
             rCtx.viewsConfigSend != nullptr &&
@@ -90,7 +90,7 @@ constexpr inline bool is_valid(const ALXRRustCtx& rCtx)
             rCtx.requestIDR != nullptr;
 }
 
-bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemProperties) {
+bool alxr_init(const ALXRClientCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemProperties) {
     try {
         if (rCtx == nullptr || !is_valid(*rCtx))
         {
@@ -98,8 +98,8 @@ bool alxr_init(const ALXRRustCtx* rCtx, /*[out]*/ ALXRSystemProperties* systemPr
             return false;
         }
         
-        gRustCtx = std::make_shared<ALXRRustCtx>(*rCtx);
-        const auto &ctx = *gRustCtx;
+        gClientCtx = std::make_shared<ALXRClientCtx>(*rCtx);
+        const auto &ctx = *gClientCtx;
         if (ctx.verbose)
             Log::SetLevel(Log::Level::Verbose);
         
@@ -197,8 +197,8 @@ void alxr_stop_decoder_thread()
 }
 
 void alxr_destroy() {
-    const auto rustCtx = gRustCtx;
-    if (rustCtx == nullptr) {
+    const auto clientCtx = gClientCtx;
+    if (clientCtx == nullptr) {
         assert(gProgram == nullptr);
         return;
     }
@@ -211,7 +211,7 @@ void alxr_destroy() {
     }
     alxr_stop_decoder_thread();
     gProgram.reset();
-    gRustCtx.reset();
+    gClientCtx.reset();
 }
 
 void alxr_request_exit_session() {
@@ -299,7 +299,7 @@ void alxr_set_stream_config(const ALXRStreamConfig config)
         const XrDecoderThread::StartCtx startCtx{
             .decoderConfig = config.decoderConfig,
             .programPtr = programPtr,
-            .rustCtx = gRustCtx
+            .clientCtx = gClientCtx
         };
         gDecoderThread.Start(startCtx);
         Log::Write(Log::Level::Info, "Decoder Thread started.");
@@ -307,7 +307,7 @@ void alxr_set_stream_config(const ALXRStreamConfig config)
 #endif
     // OpenXR does not have functions to query the battery levels of devices.
     const auto SendDummyBatteryLevels = []() {
-        const auto rCtx = gRustCtx;
+        const auto rCtx = gClientCtx;
         if (rCtx == nullptr)
             return;
         const auto head_path        = rCtx->pathStringToHash(ALXRStrings::HeadPath);
@@ -377,8 +377,8 @@ inline void LogViewConfig(const ALXREyeInfo& newEyeInfo)
 
 void alxr_on_tracking_update(const bool clientsidePrediction)
 {
-    const auto rustCtx = gRustCtx;
-    if (rustCtx == nullptr)
+    const auto clientCtx = gClientCtx;
+    if (clientCtx == nullptr)
         return;
     const auto xrProgram = gProgram;
     if (xrProgram == nullptr || !xrProgram->IsSessionRunning())
@@ -392,7 +392,7 @@ void alxr_on_tracking_update(const bool clientsidePrediction)
         std::abs(newEyeInfo.eyeFov[1].left - gLastEyeInfo.eyeFov[1].left) > 0.01f)
     {
         gLastEyeInfo = newEyeInfo;
-        gRustCtx->viewsConfigSend(&newEyeInfo);
+        gClientCtx->viewsConfigSend(&newEyeInfo);
         LogViewConfig(newEyeInfo);
     }
 
@@ -401,7 +401,7 @@ void alxr_on_tracking_update(const bool clientsidePrediction)
     TrackingInfo newInfo;
     if (!xrProgram->GetTrackingInfo(newInfo, clientsidePrediction))
         return;
-    rustCtx->inputSend(&newInfo);
+    clientCtx->inputSend(&newInfo);
 }
 
 void alxr_on_receive(const unsigned char* packet, unsigned int packetSize)

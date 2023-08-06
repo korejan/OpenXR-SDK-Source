@@ -39,11 +39,11 @@ public:
 
 	struct StartCtx {
 		using IOpenXrProgramPtr = std::shared_ptr<IOpenXrProgram>;
-		using ALXRRustCtxPtr	= std::shared_ptr<const ALXRRustCtx>;
+		using ALXRClientCtxPtr	= std::shared_ptr<const ALXRClientCtx>;
 
 		ALXRDecoderConfig decoderConfig;
 		IOpenXrProgramPtr programPtr;
-		ALXRRustCtxPtr	  rustCtx;
+		ALXRClientCtxPtr  clientCtx;
 	};
 	void Start(const StartCtx& ctx);
 	void Stop();

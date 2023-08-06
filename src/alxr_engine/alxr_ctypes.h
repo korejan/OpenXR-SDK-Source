@@ -108,7 +108,7 @@ struct ALXRVersion {
     uint32_t patch;
 };
 
-typedef struct ALXRRustCtx
+typedef struct ALXRClientCtx
 {
     void (*inputSend)(const TrackingInfo* data);
     void (*viewsConfigSend)(const ALXREyeInfo* eyeInfo);

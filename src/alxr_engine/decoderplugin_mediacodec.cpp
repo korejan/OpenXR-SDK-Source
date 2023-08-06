@@ -476,9 +476,9 @@ struct MediaCodecDecoderPlugin final : IDecoderPlugin
                     codec.reset();
                     break;
                 }
-                if (const auto rustCtx = ctx.rustCtx) {
-                    //rustCtx->setWaitingNextIDR(true);
-                    //rustCtx->requestIDR();
+                if (const auto clientCtx = ctx.clientCtx) {
+                    //clientCtx->setWaitingNextIDR(true);
+                    //clientCtx->requestIDR();
                     if (const auto programPtr = ctx.programPtr) {
                         programPtr->SetRenderMode(IOpenXrProgram::RenderMode::VideoStream);
                     }
@@ -501,8 +501,8 @@ struct MediaCodecDecoderPlugin final : IDecoderPlugin
                 {
                     const auto& packet_data = packet.data;
                     if (packet.is_idr(ctx.config.codecType)) {
-                        if (const auto rustCtx = ctx.rustCtx) {
-                            rustCtx->setWaitingNextIDR(false);
+                        if (const auto clientCtx = ctx.clientCtx) {
+                            clientCtx->setWaitingNextIDR(false);
                             //Log::Write(Log::Level::Verbose, "Finished waiting for next IDR.");
                         }
                     }

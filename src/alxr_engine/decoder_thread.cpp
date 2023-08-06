@@ -67,11 +67,11 @@ void XrDecoderThread::Start(const XrDecoderThread::StartCtx& ctx)
 #else
 	auto decoderType = ALXRDecoderType::VAAPI;
 #endif
-	if (const auto rustCtx = ctx.rustCtx) {
-		decoderType = rustCtx->decoderType;
+	if (const auto clientCtx = ctx.clientCtx) {
+		decoderType = clientCtx->decoderType;
 		Log::Write(Log::Level::Verbose, "Sending IDR request");
-		rustCtx->setWaitingNextIDR(true);
-		rustCtx->requestIDR();
+		clientCtx->setWaitingNextIDR(true);
+		clientCtx->requestIDR();
 	}
 
 #ifndef XR_DISABLE_DECODER_THREAD
@@ -93,7 +93,7 @@ void XrDecoderThread::Start(const XrDecoderThread::StartCtx& ctx)
 			const IDecoderPlugin::RunCtx runCtx {
 				.optionMap	 = std::move(optionMap),
 				.config		 = startCtx.decoderConfig,
-				.rustCtx	 = startCtx.rustCtx,
+				.clientCtx	 = startCtx.clientCtx,
 				.programPtr	 = startCtx.programPtr,
 				.decoderType = decoderType
 			};
