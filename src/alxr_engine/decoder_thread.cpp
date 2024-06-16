@@ -82,11 +82,12 @@ void XrDecoderThread::Start(const XrDecoderThread::StartCtx& ctx)
 	optionMap.setInt32("decode-low-latency", 1);
 #endif
 	const IDecoderPlugin::RunCtx runCtx{
-		.optionMap   = std::move(optionMap),
-		.config      = ctx.decoderConfig,
-		.clientCtx   = ctx.clientCtx,
-		.programPtr  = ctx.programPtr,
-		.decoderType = decoderType
+		.optionMap    = std::move(optionMap),
+		.renderConfig = ctx.renderConfig,
+		.config       = ctx.decoderConfig,
+		.clientCtx    = ctx.clientCtx,
+		.programPtr   = ctx.programPtr,
+		.decoderType  = decoderType
 	};
 	m_decoderPlugin = CreateDecoderPlugin(runCtx);
 	LatencyManager::Instance().ResetAll();

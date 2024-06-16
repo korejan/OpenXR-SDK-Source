@@ -41,6 +41,7 @@ public:
 		using IOpenXrProgramPtr = std::shared_ptr<IOpenXrProgram>;
 		using ALXRClientCtxPtr	= std::shared_ptr<const ALXRClientCtx>;
 
+		ALXRRenderConfig  renderConfig;
 		ALXRDecoderConfig decoderConfig;
 		IOpenXrProgramPtr programPtr;
 		ALXRClientCtxPtr  clientCtx;

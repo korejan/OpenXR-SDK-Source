@@ -23,9 +23,11 @@ struct alignas(16) ViewProjectionConstantBuffer {
     DirectX::XMFLOAT4X4A ViewProjection;
     std::uint32_t ViewID;
 };
-
 struct alignas(16) MultiViewProjectionConstantBuffer {
     DirectX::XMFLOAT4X4A ViewProjection[2];
+};
+struct alignas(16) ImageScaleConstantBuffer {
+    DirectX::XMFLOAT2A ImageScale;
 };
 
 enum VideoPShader : std::size_t {

@@ -8,6 +8,8 @@
 #undef None
 #endif
 
+#include <memory>
+
 namespace ALXR {
     struct FoveatedDecodeParams;
 }
@@ -142,6 +144,16 @@ struct IGraphicsPlugin {
     virtual void UpdateVideoTextureD3D11VA(const YUVBuffer& /*yuvBuffer*/) {}
     virtual void UpdateVideoTextureMediaCodec(const YUVBuffer& /*yuvBuffer*/) {}
     virtual void UpdateVideoTextureVAAPI(const YUVBuffer& /*yuvBuffer*/) {}
+
+    struct IYUVHWBuffer : std::enable_shared_from_this<IYUVHWBuffer> {
+        virtual ~IYUVHWBuffer() = default;
+        virtual std::uint64_t frameIndex() const = 0;
+        virtual bool luma(Buffer& lumaeBuff) const = 0;
+        virtual bool chroma(Buffer& chromaBuff) const = 0;
+        virtual bool chroma2(Buffer& chroma2Buff) const = 0;
+    };
+    using IYUVHWBufferPtr = std::shared_ptr<IYUVHWBuffer>;
+    virtual void UpdateVideoTextureD3D11VA(const IYUVHWBufferPtr& /*yuvBuffer*/) {}
 
     virtual void ClearVideoTextures(){};
 

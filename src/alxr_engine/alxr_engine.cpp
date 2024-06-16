@@ -296,9 +296,10 @@ void alxr_set_stream_config(const ALXRStreamConfig config)
         Log::Write(Log::Level::Info, "Starting decoder thread.");
 
         const XrDecoderThread::StartCtx startCtx{
+            .renderConfig  = config.renderConfig,
             .decoderConfig = config.decoderConfig,
-            .programPtr = programPtr,
-            .clientCtx = gClientCtx
+            .programPtr    = programPtr,
+            .clientCtx     = gClientCtx
         };
         gDecoderThread.Start(startCtx);
         Log::Write(Log::Level::Info, "Decoder Thread started.");

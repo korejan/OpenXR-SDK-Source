@@ -3,6 +3,7 @@
 #include "pch.h"
 #include "common.h"
 #include "decoderplugin.h"
+#include "foveation.h"
 
 #include <cstring>
 #include <functional>
@@ -44,8 +45,7 @@ extern "C" {
 namespace {;
 template < typename AVType, void(&avdeleter)(AVType*) >
 struct AVDeleter1 {
-    inline void operator()(AVType* avc) const
-    {
+    inline void operator()(AVType* avc) const {
         if (avc)
             avdeleter(avc);
     }
@@ -53,8 +53,7 @@ struct AVDeleter1 {
 
 template < typename AVType, void(&avdeleter)(AVType**) >
 struct AVDeleter2 {
-    inline void operator()(AVType* avc) const
-    {
+    inline void operator()(AVType* avc) const {
         if (avc)
             avdeleter(&avc);
     }
@@ -410,12 +409,12 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
             return false;
         }
 
-        const AVFramePtr swFrame{ av_frame_alloc() };
-        const AVFramePtr hwFrame{ av_frame_alloc() };
-        if (swFrame == nullptr || hwFrame == nullptr) {
-            Log::Write(Log::Level::Error, "Failed to allocate avFrames.");
-            return false;
-        }
+        //const AVFramePtr swFrame{ av_frame_alloc() };
+        //const AVFramePtr hwFrame{ av_frame_alloc() };
+        //if (swFrame == nullptr || hwFrame == nullptr) {
+        //    Log::Write(Log::Level::Error, "Failed to allocate avFrames.");
+        //    return false;
+        //}
 
         const auto [CreateVideoTextures, UpdateVideoTextures, isBufferInteropSupported] = GetVideoTextureMemFuns(m_ctx.decoderType);
         assert(CreateVideoTextures != nullptr && UpdateVideoTextures != nullptr);
@@ -440,6 +439,10 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
             pkt->pts = duration_cast<microseconds64>(ClockType::now().time_since_epoch()).count();
 
             LatencyCollector::Instance().decoderInput(nalPacket.frameIndex);
+
+            AVFramePtr swFrame{ av_frame_alloc() };
+            AVFramePtr hwFrame{ av_frame_alloc() };
+
             const auto result = decode_packet(pkt.get(), codecCtx.get(), hwFrame.get());
             LatencyCollector::Instance().decoderOutput(nalPacket.frameIndex);
             //av_packet_unref(pkt.get());
@@ -449,7 +452,7 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
                 continue;
             }
 
-            const auto& avFrame = [&/*, isBTS = isBufferInteropSupported*/]() -> const AVFramePtr& {
+            auto& avFrame = [&/*, isBTS = isBufferInteropSupported*/]() -> AVFramePtr& {
                 if (isBufferInteropSupported || type == AV_HWDEVICE_TYPE_NONE)
                     return hwFrame;
                 CHECK(hwFrame->format == m_hwPixFmt);
@@ -467,7 +470,19 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
                 planeCount = PlaneCount(pixFmt);
                 assert(planeCount > 0);
                 Log::Write(Log::Level::Verbose, Fmt("Pixel Format: %lu", pixFmt));
-                std::invoke(CreateVideoTextures, graphicsPluginPtr, avFrame->width, avFrame->height, pixFmt);
+                //std::invoke(CreateVideoTextures, graphicsPluginPtr, avFrame->width, avFrame->height, pixFmt);
+                
+#if 0
+                if (const auto d3d11vaFramesCtx = get_hw_frames_context(codecCtx.get())) {
+                    if (m_ctx.renderConfig.enableFoveation) {
+                        auto rc = m_ctx.renderConfig;
+                        rc.eyeWidth = d3d11vaFramesCtx->width;
+                        rc.eyeHeight = d3d11vaFramesCtx->height;
+                        const ALXR::FoveatedDecodeParams fdParams = ALXR::MakeFoveatedDecodeParams(rc);
+                        graphicsPluginPtr->SetFoveatedDecode(&fdParams);
+                    }
+                }
+#endif
 
                 if (const auto clientCtx = m_ctx.clientCtx) {
                     clientCtx->setWaitingNextIDR(false);
@@ -498,7 +513,36 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
                     .height = uvHeight
                 };
             }
+#if 1
+            struct YUVBufferD3D11 final : IGraphicsPlugin::IYUVHWBuffer {
+
+                AVFramePtr hwFrame;
+                IGraphicsPlugin::YUVBuffer buf;
+
+                inline YUVBufferD3D11(AVFramePtr&& hwf, const IGraphicsPlugin::YUVBuffer& b)
+                : hwFrame{ std::move(hwf) }, buf{ b } {}
+                
+                std::uint64_t frameIndex() const override {
+                    return buf.frameIndex;
+                }
+                bool luma(IGraphicsPlugin::Buffer& lumaeBuff) const override {
+                    lumaeBuff = buf.luma;
+                    return true;
+                }
+                bool chroma(IGraphicsPlugin::Buffer& chromaBuff) const override {
+                    chromaBuff = buf.chroma;
+                    return true;
+                }
+                bool chroma2(IGraphicsPlugin::Buffer& chroma2Buff) const override {
+                    chroma2Buff = buf.chroma2;
+                    return true;
+                }
+            };
+            auto fooBar = std::make_shared<YUVBufferD3D11>(std::move(avFrame), buffer);
+            graphicsPluginPtr->UpdateVideoTextureD3D11VA(fooBar);
+#else
             std::invoke(UpdateVideoTextures, graphicsPluginPtr, buffer);
+#endif
         }
         return true;
     }
@@ -618,6 +662,19 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
     }
 #endif
 
+    inline static AVHWFramesContext* get_hw_frames_context(AVCodecContext* avctx) {
+        if (avctx == nullptr || avctx->hw_frames_ctx == nullptr)
+            return nullptr;
+        return reinterpret_cast<AVHWFramesContext*>(avctx->hw_frames_ctx->data);
+    }
+
+    inline static AVD3D11VAFramesContext* get_d3d11va_frames_context(AVCodecContext* avctx) {
+        auto fctx = get_hw_frames_context(avctx);
+        if (fctx == nullptr)
+            return nullptr;
+        return reinterpret_cast<AVD3D11VAFramesContext*>(fctx->hwctx);
+    }
+
     static AVPixelFormat get_hw_format(AVCodecContext* avctx, const AVPixelFormat* pix_fmts)
     {
         if (pix_fmts == nullptr || avctx == nullptr) {
@@ -632,8 +689,24 @@ struct FFMPEGDecoderPlugin final : public IDecoderPlugin {
         }
 
         for (const AVPixelFormat* p = pix_fmts; *p != -1; ++p) {
-            if (*p == this_->m_hwPixFmt)
+            if (*p == this_->m_hwPixFmt) {
+                if (this_->m_hwPixFmt == AV_PIX_FMT_D3D11) {
+                    AVBufferRef* new_frames_ctx = nullptr;
+                    if (avcodec_get_hw_frames_parameters(avctx, avctx->hw_device_ctx, AV_PIX_FMT_D3D11, &new_frames_ctx) < 0) {
+                        return AV_PIX_FMT_NONE;
+                    }
+                    auto fctx = (AVHWFramesContext*)new_frames_ctx->data;
+                    auto d3d11HFrameCtx = reinterpret_cast<AVD3D11VAFramesContext*>(fctx->hwctx);
+                    d3d11HFrameCtx->BindFlags |= D3D11_BIND_DECODER | D3D11_BIND_SHADER_RESOURCE;
+                    auto ret = av_hwframe_ctx_init(new_frames_ctx);
+                    if (ret < 0) {
+                        LogLibAV(Log::Level::Error, ret, "Failed to init av_hw_frames");
+                        return AV_PIX_FMT_NONE;
+                    }
+                    avctx->hw_frames_ctx = /*av_buffer_ref*/(new_frames_ctx);
+                }
                 return *p;
+            }
         }
         Log::Write(Log::Level::Error, "Failed to get HW surface format.\n");
         return AV_PIX_FMT_NONE;

@@ -81,6 +81,7 @@ struct IDecoderPlugin {
         using ClientCtxPtr = std::shared_ptr<const ALXRClientCtx>;
 
         OptionMap         optionMap;
+        ALXRRenderConfig  renderConfig;
         ALXRDecoderConfig config;
         ClientCtxPtr      clientCtx;
         IOpenXrProgramPtr programPtr;

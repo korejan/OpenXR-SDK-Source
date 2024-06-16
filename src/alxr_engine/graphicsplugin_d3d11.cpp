@@ -6,12 +6,15 @@
 #include "common.h"
 #include "geometry.h"
 #include "graphicsplugin.h"
+#include "options.h"
 
 #if defined(XR_USE_GRAPHICS_API_D3D11)
 
 #include <array>
 #include <vector>
 #include <atomic>
+
+#include <readerwritercircularbuffer.h>
 
 #include "xr_eigen.h"
 #include <DirectXColors.h>
@@ -124,7 +127,12 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     };
     using CoreShaders = ALXR::CoreShaders<D3D11ShaderByteCode>;
 
-    D3D11GraphicsPlugin(const std::shared_ptr<Options>&, std::shared_ptr<IPlatformPlugin>){};
+    D3D11GraphicsPlugin(const std::shared_ptr<Options>& options, std::shared_ptr<IPlatformPlugin>){
+        if (options) {
+            m_noServerFramerateLock = options->NoServerFramerateLock;
+            m_noFrameSkip = options->NoFrameSkip;
+        }
+    }
 
     std::vector<std::string> GetInstanceExtensions() const override { return {XR_KHR_D3D11_ENABLE_EXTENSION_NAME}; }
 
@@ -152,7 +160,11 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         CHECK_MSG(featureLevels.size() != 0, "Unsupported minimum feature level!");
 
         InitializeD3D11DeviceForAdapter(adapter.Get(), featureLevels, m_device.ReleaseAndGetAddressOf(),
-                                        m_deviceContext.ReleaseAndGetAddressOf());
+                                        m_deviceContext.ReleaseAndGetAddressOf()
+#ifndef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
+            , D3D11_CREATE_DEVICE_VIDEO_SUPPORT
+#endif
+        );
         SetMultithreadProtected(m_device);
         InitializeD3D11VADevice(adapter, featureLevels);
         
@@ -166,12 +178,16 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
     void InitializeD3D11VADevice(const ComPtr<IDXGIAdapter1>& adapter, const FeatureLvlList& featureLevels)
     {
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
         InitializeD3D11DeviceForAdapter
         (
             adapter.Get(), featureLevels, m_d3d11va_device.ReleaseAndGetAddressOf(),
             nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT
         );
         SetMultithreadProtected(m_d3d11va_device);
+#else
+        m_d3d11va_device = m_device;
+#endif
     }
 
     void InitializeVideoRenderResources()
@@ -254,6 +270,20 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         CHECK_HRCMD(
             m_device->CreateBuffer(&viewProjectionConstantBufferDesc, nullptr, m_viewProjectionCBuffer.ReleaseAndGetAddressOf()));
 
+        constexpr const ALXR::ImageScaleConstantBuffer InitScale = {
+            .ImageScale = XMFLOAT2A(1.f, 1.f),
+        };
+        const D3D11_SUBRESOURCE_DATA imageScaleInit = {
+            .pSysMem = &InitScale,
+            .SysMemPitch = 0,
+            .SysMemSlicePitch = 0,
+        };
+        const CD3D11_BUFFER_DESC imageScaleConstantBufferDesc(
+            sizeof(ALXR::ImageScaleConstantBuffer),
+            D3D11_BIND_CONSTANT_BUFFER
+        );
+        CHECK_HRCMD(m_device->CreateBuffer(&imageScaleConstantBufferDesc, &imageScaleInit, m_imageScaleCBuffer.ReleaseAndGetAddressOf()));
+
         const CD3D11_BUFFER_DESC fovDecodeBufferDesc(sizeof(ALXR::FoveatedDecodeParams), D3D11_BIND_CONSTANT_BUFFER);
         CHECK_HRCMD(m_device->CreateBuffer(&fovDecodeBufferDesc, nullptr, m_fovDecodeCBuffer.ReleaseAndGetAddressOf()));
 
@@ -292,7 +322,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     std::vector<XrSwapchainImageBaseHeader*> AllocateSwapchainImageStructs(
-        uint32_t capacity, const XrSwapchainCreateInfo& /*swapchainCreateInfo*/) override {
+        uint32_t capacity, const XrSwapchainCreateInfo& swapchainCreateInfo) override {
         // Allocate and initialize the buffer of image structs (must be sequential in memory for xrEnumerateSwapchainImages).
         // Return back an array of pointers to each swapchain image struct so the consumer doesn't need to know the type/size.
         std::vector<XrSwapchainImageD3D11KHR> swapchainImageBuffer(capacity, {
@@ -308,6 +338,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
         // Keep the buffer alive by moving it into the list of buffers.
         m_swapchainImageBuffers.push_back(std::move(swapchainImageBuffer));
+        m_swapchainInfo = swapchainCreateInfo;
 
         return swapchainImageBase;
     }
@@ -447,10 +478,18 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     {
         RenderMultiViewImpl(layerViews[0], swapchainImage, swapchainFormat, ALXR::VideoClearColors[ClearColorIndex(newMode)], [&]()
         {
+#ifndef OLD_IMPL
+            if (!currentTexture.IsValid())
+                return;
+            const auto& videoTex = currentTexture.texture;
+#else
             if (currentTextureIdx == std::size_t(-1))
                 return;
             const auto& videoTex = m_videoTextures[currentTextureIdx];
+#endif
 
+            ID3D11Buffer* const constantBuffers[] = { m_imageScaleCBuffer.Get() };
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
             m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
 
             if (const auto fovDecParmPtr = m_fovDecodeParams) {
@@ -563,14 +602,34 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     uint32_t GetSupportedSwapchainSampleCount(const XrViewConfigurationView&) override { return 1; }
 
     virtual const void* GetD3D11AVDevice() const override {
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
         CHECK(m_d3d11va_device != nullptr);
         return m_d3d11va_device.Get();
+#else
+        CHECK(m_device != nullptr);
+        return m_device.Get();
+#endif
     }
 
     virtual void* GetD3D11AVDevice() override {
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
         CHECK(m_d3d11va_device != nullptr);
         return m_d3d11va_device.Get();
+#else
+        CHECK(m_device != nullptr);
+        return m_device.Get();
+#endif
     }
+
+#ifndef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
+    virtual const void* GetD3D11VADeviceContext() const override {
+        return m_deviceContext.Get();
+    }
+
+    virtual void* GetD3D11VADeviceContext() override {
+        return m_deviceContext.Get();
+    }
+#endif
 
     virtual void ClearVideoTextures() override
     {
@@ -579,6 +638,9 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         //std::lock_guard<std::mutex> lk(m_renderMutex);
         m_texRendereComplete.WaitForGpu();
         m_videoTextures = { NV12Texture {}, NV12Texture {} };
+        currentTexture = {};
+        m_lastVideoFrameWidth = m_lastVideoFrameHeight = 0;
+        m_videoTexQueue = VideoTextureQueue(VideoQueueSize);
     }
 
     void CreateVideoTextures
@@ -838,9 +900,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         (
             width, height, MapFormat(pixfmt),
             D3D11_BIND_SHADER_RESOURCE,
-            D3D11_USAGE_DEFAULT,
-            D3D11_RESOURCE_MISC_SHARED
+            D3D11_USAGE_DEFAULT
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
+            , D3D11_RESOURCE_MISC_SHARED
+#endif
         );
+
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
         for (auto& vidTex : m_videoTextures)
         {
             auto data = vidTex.data.back();
@@ -863,6 +929,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
             vidTex.d3d11vaSharedData.push_back(shared_texture);
         }
+#endif
     }
 
     virtual void UpdateVideoTextureD3D11VA(const YUVBuffer& yuvBuffer) override
@@ -876,7 +943,11 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         {
             /*const*/ auto& videoTex = m_videoTextures[freeIndex];
             videoTex.frameIndex = yuvBuffer.frameIndex;
+#ifdef ALXR_D3D11_USE_DEDICATED_VIDEO_DEVICE
             auto dstVideoTexture = videoTex.d3d11vaSharedData.back();
+#else
+            auto dstVideoTexture = videoTex.data.back();
+#endif
             CHECK(dstVideoTexture != nullptr)
             
             D3D11_TEXTURE2D_DESC desc;
@@ -907,8 +978,106 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         m_renderTex.store(freeIndex);
     }
 
+    virtual void UpdateVideoTextureD3D11VA(const IYUVHWBufferPtr& yuvBuffer) override {
+
+        Buffer lumaBuffer{}; 
+        Buffer chromaBuffer{};
+
+        if (!yuvBuffer->luma(lumaBuffer))
+            return;
+        if (!yuvBuffer->chroma(chromaBuffer))
+            return;
+
+        ComPtr<ID3D11Texture2D> src_texture = reinterpret_cast<ID3D11Texture2D*>(lumaBuffer.data);
+        const auto texture_index = (UINT)reinterpret_cast<std::intptr_t>(chromaBuffer.data);
+
+        VideoTexture newVideoTex{};
+        newVideoTex.hwBuffer = yuvBuffer;
+        auto& textureData = newVideoTex.texture;
+        textureData.data.push_back(src_texture);
+
+        D3D11_TEXTURE2D_DESC descDepth;
+        src_texture->GetDesc(&descDepth);
+
+        const auto lumaPlaneSRVDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC
+        (
+            src_texture.Get(),
+            D3D11_SRV_DIMENSION_TEXTURE2DARRAY,
+            ALXR::GetLumaFormat(descDepth.Format),
+            0, -1, texture_index, 1 //descDepth.ArraySize
+        );
+        CHECK_HRCMD(m_device->CreateShaderResourceView(src_texture.Get(), &lumaPlaneSRVDesc, textureData.lumaSRV.ReleaseAndGetAddressOf()));
+
+        const auto chromaPlaneSRVDesc = CD3D11_SHADER_RESOURCE_VIEW_DESC
+        (
+            src_texture.Get(),
+            D3D11_SRV_DIMENSION_TEXTURE2DARRAY,
+            ALXR::GetChromaFormat(descDepth.Format),
+            0, -1, texture_index, 1 //descDepth.ArraySize
+        );
+        CHECK_HRCMD(m_device->CreateShaderResourceView(src_texture.Get(), &chromaPlaneSRVDesc, textureData.chromaSRV.ReleaseAndGetAddressOf()));
+
+        using namespace std::literals::chrono_literals;
+        constexpr static const auto QueueTextureWaitTime = 100ms;
+        if (!m_videoTexQueue.wait_enqueue_timed(std::move(newVideoTex), QueueTextureWaitTime)) {
+            Log::Write(Log::Level::Warning, Fmt("Waiting to queue decoded video frame (pts: %llu) timed-out after %lld seconds, this frame will be ignored", yuvBuffer->frameIndex(), QueueTextureWaitTime.count()));
+        }
+    }
+
     virtual void BeginVideoView() override
     {
+#ifndef FOOBAR_TEST
+        VideoTexture newVideoTex{};
+
+        if (m_noFrameSkip) {
+            m_videoTexQueue.try_dequeue(newVideoTex);
+        }
+        else {
+            std::size_t popCount = 0;
+            while (m_videoTexQueue.try_dequeue(newVideoTex) && popCount < VideoQueueSize) {
+                ++popCount;
+            }
+            if (popCount > 1) {
+                Log::Write(Log::Level::Info, Fmt("Video Texture Queue Pop Count: %llu", popCount));
+            }
+        }
+
+        if (!m_noServerFramerateLock && !newVideoTex.IsValid()) {
+            using namespace std::literals::chrono_literals;
+            constexpr static const auto QueueTextureWaitTime = 100ms;
+            m_videoTexQueue.wait_dequeue_timed(newVideoTex, QueueTextureWaitTime);
+        }
+
+        if (newVideoTex.IsValid()) {
+            currentTexture = std::move(newVideoTex);
+            D3D11_TEXTURE2D_DESC desc = {};
+            currentTexture.texture.data.back()->GetDesc(&desc);
+            if (desc.Width != m_lastVideoFrameWidth || desc.Height != m_lastVideoFrameHeight) {
+                const std::uint32_t scw2x = m_swapchainInfo.width * 2;
+                float sx = 1.f, sy = 1.f;
+                if (desc.Width < scw2x) {
+                    sx = (scw2x - desc.Width) / static_cast<float>(desc.Width);
+                } else {
+                    sx = (desc.Width - scw2x) / static_cast<float>(scw2x);
+                }
+                if (desc.Width < scw2x) {
+                    sy = (m_swapchainInfo.height - desc.Height) / static_cast<float>(desc.Height);
+                } else {
+                    sy = (desc.Height - m_swapchainInfo.height) / static_cast<float>(m_swapchainInfo.height);
+                }
+                const ALXR::ImageScaleConstantBuffer imageScale = {
+                    .ImageScale = XMFLOAT2A(
+                        1.f - sx,
+                        1.f - sy
+                    ),
+                };
+                m_deviceContext->UpdateSubresource(m_imageScaleCBuffer.Get(), 0, nullptr, &imageScale, 0, 0);
+                m_lastVideoFrameWidth = desc.Width;
+                m_lastVideoFrameHeight = desc.Height;
+            }
+        }
+#else
+
 #if 0
 #ifdef XR_ENABLE_CUDA_INTEROP
         const cudaExternalSemaphoreWaitParams externalSemaphoreWaitParams{
@@ -930,6 +1099,7 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
             m_deviceContext->ExecuteCommandList(vidTex.cmdList.Get(), FALSE);
             vidTex.cmdList.Reset();
         }
+#endif
     }
 
     virtual void EndVideoView() override
@@ -952,9 +1122,15 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     virtual std::uint64_t GetVideoFrameIndex() const override {
+#ifndef OLD_IMPL
+        if (!currentTexture.IsValid())
+            return std::uint64_t(-1);
+        return currentTexture.hwBuffer->frameIndex();
+#else
         return currentTextureIdx == std::uint64_t(-1) ?
             currentTextureIdx :
             m_videoTextures[currentTextureIdx].frameIndex;
+#endif
     }
 
     constexpr static inline std::size_t VideoShaderIndex(const bool is3PlaneFmt, const PassthroughMode newMode) {
@@ -970,15 +1146,21 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     {
         RenderViewImpl(layerView, swapchainImage, swapchainFormat, ALXR::VideoClearColors[ClearColorIndex(newMode)], [&]()
         {
+#ifndef OLD_IMPL
+            if (!currentTexture.IsValid())
+                return;
+            const auto& videoTex = currentTexture.texture;
+#else
             if (currentTextureIdx == std::size_t(-1))
                 return;
             const auto& videoTex = m_videoTextures[currentTextureIdx];
+#endif
 
             const ALXR::ViewProjectionConstantBuffer viewProjection{ .ViewID = viewID };
             m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
 
-            ID3D11Buffer* const constantBuffers[] = { m_viewProjectionCBuffer.Get() };
-            m_deviceContext->VSSetConstantBuffers(1, (UINT)std::size(constantBuffers), constantBuffers);
+            ID3D11Buffer* const constantBuffers[] = { m_viewProjectionCBuffer.Get(), m_imageScaleCBuffer.Get() };
+            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
             m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
 
             if (const auto fovDecParmPtr = m_fovDecodeParams) {
@@ -1049,12 +1231,17 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     LUID                        m_d3d11DeviceLUID {};
     XrGraphicsBindingD3D11KHR m_graphicsBinding{.type=XR_TYPE_GRAPHICS_BINDING_D3D11_KHR, .next=nullptr};
     std::list<std::vector<XrSwapchainImageD3D11KHR>> m_swapchainImageBuffers;
+    XrSwapchainCreateInfo m_swapchainInfo = {
+        .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
+        .next = nullptr,
+    };
     CoreShaders m_coreShaders{};
     ComPtr<ID3D11VertexShader> m_vertexShader;
     ComPtr<ID3D11PixelShader> m_pixelShader;
     ComPtr<ID3D11InputLayout> m_inputLayout;
     ComPtr<ID3D11Buffer> m_modelCBuffer;
     ComPtr<ID3D11Buffer> m_viewProjectionCBuffer;
+    ComPtr<ID3D11Buffer> m_imageScaleCBuffer;
     ComPtr<ID3D11Buffer> m_fovDecodeCBuffer;
     ComPtr<ID3D11Buffer> m_cubeVertexBuffer;
     ComPtr<ID3D11Buffer> m_cubeIndexBuffer;
@@ -1084,10 +1271,40 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
         ComPtr<ID3D11ShaderResourceView> chromaVSRV{};
         CommandListPtr cmdList{};
         std::uint64_t frameIndex = std::uint64_t(-1);
+
+        NV12Texture() noexcept = default;
+        NV12Texture(NV12Texture&&) = default;
+        NV12Texture& operator=(NV12Texture&&) = default;
+
+        NV12Texture(const NV12Texture&) = delete;
+        NV12Texture& operator=(const NV12Texture&) = delete;
     };
     std::array<NV12Texture, 2> m_videoTextures{};
     std::atomic<std::size_t>   m_currentVideoTex{ (std::size_t)0 }, m_renderTex{ (std::size_t)-1 };
     std::size_t currentTextureIdx = std::size_t(-1);
+
+    static constexpr const std::size_t VideoQueueSize = 6;
+    struct VideoTexture final {
+        NV12Texture     texture;
+        IYUVHWBufferPtr hwBuffer;
+
+        VideoTexture() = default;
+
+        VideoTexture(VideoTexture&&) = default;
+        VideoTexture& operator=(VideoTexture&&) = default;
+
+        VideoTexture(const VideoTexture&) = delete;
+        VideoTexture& operator=(const VideoTexture&) = delete;
+
+        bool IsValid() const { return hwBuffer != nullptr; }
+    };
+
+    using VideoTextureQueue = moodycamel::BlockingReaderWriterCircularBuffer<VideoTexture>;
+    VideoTextureQueue m_videoTexQueue{ VideoQueueSize };
+    VideoTexture currentTexture{};
+    std::uint32_t m_lastVideoFrameWidth{0};
+    std::uint32_t m_lastVideoFrameHeight{0};
+
     //std::mutex                     m_renderMutex{};
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1098,6 +1315,8 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     std::size_t m_clearColorIndex{ (XR_ENVIRONMENT_BLEND_MODE_OPAQUE - 1) };
 
     bool m_isMultiViewSupported = false;
+    bool m_noServerFramerateLock = false;
+    bool m_noFrameSkip = false;
 };
 }  // namespace
 
