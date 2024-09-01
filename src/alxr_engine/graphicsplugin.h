@@ -70,8 +70,8 @@ struct IGraphicsPlugin {
     // Render to a swapchain image for a projection view.
     virtual void RenderView
     (
-        const XrCompositionLayerProjectionView& layerView,
-        const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::array<XrCompositionLayerProjectionView,2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*,2>& swapchainImages,
         const std::int64_t swapchainFormat,
         const PassthroughMode /*newMode*/,
         const std::vector<Cube>& cubes
@@ -82,9 +82,8 @@ struct IGraphicsPlugin {
 
     virtual void RenderVideoView
     (
-        const std::uint32_t /*ViewID*/,
-        const XrCompositionLayerProjectionView& /*layerView*/,
-        const XrSwapchainImageBaseHeader* /*swapchainImage*/,
+        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& /*swapchainImages*/,
         const std::int64_t /*swapchainFormat*/,
         const PassthroughMode /*newMode*/ = PassthroughMode::None
     ) {}

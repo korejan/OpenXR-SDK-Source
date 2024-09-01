@@ -1031,48 +1031,53 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
 
     virtual void RenderView
     (
-        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
         const std::int64_t swapchainFormat, const PassthroughMode ptMode,
         const std::vector<Cube>& cubes
     ) override
     {
-        assert(layerView.subImage.imageArrayIndex == 0);
-        using CpuDescHandle = D3D12_CPU_DESCRIPTOR_HANDLE;
-        using CommandListPtr = ComPtr<ID3D12GraphicsCommandList>;
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, [&]
-        (
-            const CommandListPtr& cmdList,
-            const CpuDescHandle& renderTargetView,
-            const CpuDescHandle& depthStencilView,
-            SwapchainImageContext& swapchainContext
-        )
-        {
-            // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified view.
-            cmdList->ClearRenderTargetView(renderTargetView, ALXR::ClearColors[ClearColorIndex(ptMode)], 0, nullptr);
-            cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-            const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
-            cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
+        for (std::size_t viewID = 0; viewID < layerViews.size(); ++viewID) {
+            const auto& layerView = layerViews[viewID];
+            assert(layerView.subImage.imageArrayIndex == 0);
             
-            // Set shaders and constant buffers.
-            const ALXR::ViewProjectionConstantBuffer viewProjection {
-                .ViewProjection = MakeViewProjMatrix(layerView),
-                .ViewID = 0,
-            };
-            ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
+            using CpuDescHandle = D3D12_CPU_DESCRIPTOR_HANDLE;
+            using CommandListPtr = ComPtr<ID3D12GraphicsCommandList>;
+            RenderViewImpl(layerView, swapchainImages[viewID], swapchainFormat, [&]
+            (
+                const CommandListPtr& cmdList,
+                const CpuDescHandle& renderTargetView,
+                const CpuDescHandle& depthStencilView,
+                SwapchainImageContext& swapchainContext
+            )
             {
-                constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
-                void* data = nullptr;
-                CHECK_HRCMD(viewProjectionCBuffer->Map(0, &NoReadRange, &data));
-                assert(data != nullptr);
-                std::memcpy(data, &viewProjection, sizeof(viewProjection));
-                viewProjectionCBuffer->Unmap(0, nullptr);
-            }
-            cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::ViewProjTransform, viewProjectionCBuffer->GetGPUVirtualAddress());
+                // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified view.
+                cmdList->ClearRenderTargetView(renderTargetView, ALXR::ClearColors[ClearColorIndex(ptMode)], 0, nullptr);
+                cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-            RenderVisCubes(cubes, swapchainContext, cmdList);
+                const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
+                cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
 
-        }, RenderPipelineType::Default);
+                // Set shaders and constant buffers.
+                const ALXR::ViewProjectionConstantBuffer viewProjection{
+                    .ViewProjection = MakeViewProjMatrix(layerView),
+                    .ViewID = 0,
+                };
+                ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
+                {
+                    constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
+                    void* data = nullptr;
+                    CHECK_HRCMD(viewProjectionCBuffer->Map(0, &NoReadRange, &data));
+                    assert(data != nullptr);
+                    std::memcpy(data, &viewProjection, sizeof(viewProjection));
+                    viewProjectionCBuffer->Unmap(0, nullptr);
+                }
+                cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::ViewProjTransform, viewProjectionCBuffer->GetGPUVirtualAddress());
+
+                RenderVisCubes(cubes, swapchainContext, cmdList);
+
+            }, RenderPipelineType::Default);
+        }
     }
 
     void RenderVisCubes(const std::vector<Cube>& cubes, SwapchainImageContext& swapchainContext, const ComPtr<ID3D12GraphicsCommandList>& cmdList)
@@ -1612,58 +1617,64 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         }, RenderPipelineType::Video, newMode);
     }
 
-    virtual void RenderVideoView(const std::uint32_t viewID, const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
-        const std::int64_t swapchainFormat, const PassthroughMode newMode /*= PassthroughMode::None*/) override
+    virtual void RenderVideoView(
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
+        const std::int64_t swapchainFormat, const PassthroughMode newMode /*= PassthroughMode::None*/
+    ) override
     {
-        CHECK(layerView.subImage.imageArrayIndex == 0);
-        using CpuDescHandle = D3D12_CPU_DESCRIPTOR_HANDLE;
-        using CommandListPtr = ComPtr<ID3D12GraphicsCommandList>;
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, [&]
-        (
-            const CommandListPtr& cmdList,
-            const CpuDescHandle& renderTargetView,
-            const CpuDescHandle& depthStencilView,
-            SwapchainImageContext& swapchainContext
-        )
-        {
-            if (currentTextureIdx == std::size_t(-1))
-                return;
-            const auto& videoTex = m_videoTextures[currentTextureIdx];
-            
-            ID3D12DescriptorHeap* const ppHeaps[] = { m_srvHeap.Get() };
-            cmdList->SetDescriptorHeaps((UINT)std::size(ppHeaps), ppHeaps);
-            cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::LumaTexture, videoTex.lumaGpuHandle); // Second texture will be (texture1+1)
-            cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::ChromaTexture, videoTex.chromaGpuHandle);
-            if (m_is3PlaneFormat)
-                cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::ChromaVTexture, videoTex.chromaVGpuHandle);
-            if (m_fovDecodeParams)
-                cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::FoveatedDecodeParams, swapchainContext.GetFoveationParamCBuffer()->GetGPUVirtualAddress());
-
-            // Set shaders and constant buffers.
-            ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
+        for (std::uint32_t viewID = 0; viewID < layerViews.size(); ++viewID) {
+            const auto& layerView = layerViews[viewID];
+            CHECK(layerView.subImage.imageArrayIndex == 0);
+            using CpuDescHandle = D3D12_CPU_DESCRIPTOR_HANDLE;
+            using CommandListPtr = ComPtr<ID3D12GraphicsCommandList>;
+            RenderViewImpl(layerView, swapchainImages[viewID], swapchainFormat, [&]
+            (
+                const CommandListPtr& cmdList,
+                const CpuDescHandle& renderTargetView,
+                const CpuDescHandle& depthStencilView,
+                SwapchainImageContext& swapchainContext
+            )
             {
-                const ALXR::ViewProjectionConstantBuffer viewProjection{ .ViewID = viewID };
-                constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
-                void* data = nullptr;
-                CHECK_HRCMD(viewProjectionCBuffer->Map(0, &NoReadRange, &data));
-                assert(data != nullptr);
-                std::memcpy(data, &viewProjection, sizeof(viewProjection));
-                viewProjectionCBuffer->Unmap(0, nullptr);
-            }
-            cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::ViewProjTransform, viewProjectionCBuffer->GetGPUVirtualAddress());
+                if (currentTextureIdx == std::size_t(-1))
+                    return;
+                const auto& videoTex = m_videoTextures[currentTextureIdx];
 
-            // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified view.
-            cmdList->ClearRenderTargetView(renderTargetView, ALXR::VideoClearColors[ClearColorIndex(newMode)], 0, nullptr);
-            cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+                ID3D12DescriptorHeap* const ppHeaps[] = { m_srvHeap.Get() };
+                cmdList->SetDescriptorHeaps((UINT)std::size(ppHeaps), ppHeaps);
+                cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::LumaTexture, videoTex.lumaGpuHandle); // Second texture will be (texture1+1)
+                cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::ChromaTexture, videoTex.chromaGpuHandle);
+                if (m_is3PlaneFormat)
+                    cmdList->SetGraphicsRootDescriptorTable(RootParamIndex::ChromaVTexture, videoTex.chromaVGpuHandle);
+                if (m_fovDecodeParams)
+                    cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::FoveatedDecodeParams, swapchainContext.GetFoveationParamCBuffer()->GetGPUVirtualAddress());
 
-            const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
-            cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
+                // Set shaders and constant buffers.
+                ID3D12Resource* const viewProjectionCBuffer = swapchainContext.GetViewProjectionCBuffer();
+                {
+                    const ALXR::ViewProjectionConstantBuffer viewProjection{ .ViewID = viewID };
+                    constexpr const D3D12_RANGE NoReadRange{ 0, 0 };
+                    void* data = nullptr;
+                    CHECK_HRCMD(viewProjectionCBuffer->Map(0, &NoReadRange, &data));
+                    assert(data != nullptr);
+                    std::memcpy(data, &viewProjection, sizeof(viewProjection));
+                    viewProjectionCBuffer->Unmap(0, nullptr);
+                }
+                cmdList->SetGraphicsRootConstantBufferView(RootParamIndex::ViewProjTransform, viewProjectionCBuffer->GetGPUVirtualAddress());
 
-            cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                // Clear swapchain and depth buffer. NOTE: This will clear the entire render target view, not just the specified view.
+                cmdList->ClearRenderTargetView(renderTargetView, ALXR::VideoClearColors[ClearColorIndex(newMode)], 0, nullptr);
+                cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 
-            // Draw Video Quad
-            cmdList->DrawInstanced(3, 1, 0, 0);
-        }, RenderPipelineType::Video, newMode);
+                const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { renderTargetView };
+                cmdList->OMSetRenderTargets((UINT)std::size(renderTargets), renderTargets, true, &depthStencilView);
+
+                cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+                // Draw Video Quad
+                cmdList->DrawInstanced(3, 1, 0, 0);
+            }, RenderPipelineType::Video, newMode);
+        }
     }
 
     virtual inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) override {

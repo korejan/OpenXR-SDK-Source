@@ -2966,6 +2966,8 @@ struct OpenXrProgram final : IOpenXrProgram {
         const bool isVideoStream = m_renderMode == RenderMode::VideoStream;
         const auto vizCubes = isVideoStream ? VizCubeList{} : GetVisualizedCubes(predictedDisplayTime);
         const auto ptMode = static_cast<const ::PassthroughMode>(mode);
+
+        std::array<XrSwapchainImageBaseHeader*, 2> swapchainImages = {nullptr, nullptr};
         // Render view to the appropriate part of the swapchain image.
         for (std::uint32_t i = 0; i < views.size(); ++i) {
             // Each view has a separate swapchain which is acquired, rendered to, and released.
@@ -2979,7 +2981,7 @@ struct OpenXrProgram final : IOpenXrProgram {
                 .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW,
                 .next = nullptr,
                 .pose = view.pose,
-                .fov  = view.fov,
+                .fov = view.fov,
                 .subImage = {
                     .swapchain = viewSwapchain.handle,
                     .imageRect = {
@@ -2989,12 +2991,16 @@ struct OpenXrProgram final : IOpenXrProgram {
                     .imageArrayIndex = 0
                 }
             };
-            const XrSwapchainImageBaseHeader* const swapchainImage = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
-            if (isVideoStream)
-                m_graphicsPlugin->RenderVideoView(i, projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, ptMode);
-            else
-                m_graphicsPlugin->RenderView(projectionLayerViews[i], swapchainImage, m_colorSwapchainFormat, ptMode, vizCubes);
-            
+            swapchainImages[i] = m_swapchainImages[viewSwapchain.handle][swapchainImageIndex];
+        }
+
+        if (isVideoStream)
+            m_graphicsPlugin->RenderVideoView(projectionLayerViews, swapchainImages, m_colorSwapchainFormat, ptMode);
+        else
+            m_graphicsPlugin->RenderView(projectionLayerViews, swapchainImages, m_colorSwapchainFormat, ptMode, vizCubes);
+
+        for (std::uint32_t i = 0; i < views.size(); ++i) {
+            const Swapchain& viewSwapchain = m_swapchains[i];
             constexpr const XrSwapchainImageReleaseInfo releaseInfo{
                 .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
                 .next = nullptr

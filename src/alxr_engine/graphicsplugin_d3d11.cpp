@@ -524,45 +524,49 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
     virtual void RenderView
     (
-        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
         const std::int64_t swapchainFormat, const PassthroughMode mode,
         const std::vector<Cube>& cubes
     ) override
     {
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, ALXR::ClearColors[ClearColorIndex(mode)], [&]()
-        {
-            // Set shaders and constant buffers.
-            ALXR::ViewProjectionConstantBuffer viewProjection{
-                .ViewProjection = MakeViewProjMatrix(layerView),
-            };
-            m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
+        for (std::size_t idx = 0; idx < layerViews.size(); ++idx) {
+            const auto& layerView = layerViews[idx];
+            RenderViewImpl(layerView, swapchainImages[idx], swapchainFormat, ALXR::ClearColors[ClearColorIndex(mode)], [&]()
+            {
+                // Set shaders and constant buffers.
+                ALXR::ViewProjectionConstantBuffer viewProjection{
+                    .ViewProjection = MakeViewProjMatrix(layerView),
+                };
+                m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
 
-            ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
-            m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
-            m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
-            m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
+                ID3D11Buffer* const constantBuffers[] = { m_modelCBuffer.Get(), m_viewProjectionCBuffer.Get() };
+                m_deviceContext->VSSetConstantBuffers(0, (UINT)std::size(constantBuffers), constantBuffers);
+                m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+                m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
 
-            // Set cube primitive data.
-            constexpr static const UINT strides[] = { sizeof(Geometry::Vertex) };
-            constexpr static const UINT offsets[] = { 0 };
-            ID3D11Buffer* vertexBuffers[] = { m_cubeVertexBuffer.Get() };
-            m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
-            m_deviceContext->IASetIndexBuffer(m_cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-            m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            m_deviceContext->IASetInputLayout(m_inputLayout.Get());
+                // Set cube primitive data.
+                constexpr static const UINT strides[] = { sizeof(Geometry::Vertex) };
+                constexpr static const UINT offsets[] = { 0 };
+                ID3D11Buffer* vertexBuffers[] = { m_cubeVertexBuffer.Get() };
+                m_deviceContext->IASetVertexBuffers(0, (UINT)std::size(vertexBuffers), vertexBuffers, strides, offsets);
+                m_deviceContext->IASetIndexBuffer(m_cubeIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
+                m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                m_deviceContext->IASetInputLayout(m_inputLayout.Get());
 
-            // Render each cube
-            for (const Cube& cube : cubes) {
-                // Compute and update the model transform.
-                ALXR::ModelConstantBuffer model;
-                XMStoreFloat4x4(&model.Model,
-                    XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * ALXR::LoadXrPose(cube.Pose)));
-                m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
+                // Render each cube
+                for (const Cube& cube : cubes) {
+                    // Compute and update the model transform.
+                    ALXR::ModelConstantBuffer model;
+                    XMStoreFloat4x4(&model.Model,
+                        XMMatrixTranspose(XMMatrixScaling(cube.Scale.x, cube.Scale.y, cube.Scale.z) * ALXR::LoadXrPose(cube.Pose)));
+                    m_deviceContext->UpdateSubresource(m_modelCBuffer.Get(), 0, nullptr, &model, 0, 0);
 
-                // Draw the cube.
-                m_deviceContext->DrawIndexed((UINT)std::size(Geometry::c_cubeIndices), 0, 0);
-            }
-        });
+                    // Draw the cube.
+                    m_deviceContext->DrawIndexed((UINT)std::size(Geometry::c_cubeIndices), 0, 0);
+                }
+            });
+        }
     }
 
     uint32_t GetSupportedSwapchainSampleCount(const XrViewConfigurationView&) override { return 1; }
@@ -968,48 +972,51 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
 
     virtual void RenderVideoView
     (
-        const std::uint32_t viewID, const XrCompositionLayerProjectionView& layerView,
-        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t swapchainFormat,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
+        const std::int64_t swapchainFormat,
         const PassthroughMode newMode /*= PassthroughMode::None*/
     ) override
     {
-        RenderViewImpl(layerView, swapchainImage, swapchainFormat, ALXR::VideoClearColors[ClearColorIndex(newMode)], [&]()
-        {
-            if (currentTextureIdx == std::size_t(-1))
-                return;
-            const auto& videoTex = m_videoTextures[currentTextureIdx];
+        for (std::uint32_t viewID = 0; viewID < layerViews.size(); ++viewID) {
+            RenderViewImpl(layerViews[viewID], swapchainImages[viewID], swapchainFormat, ALXR::VideoClearColors[ClearColorIndex(newMode)], [&]()
+            {
+                if (currentTextureIdx == std::size_t(-1))
+                    return;
+                const auto& videoTex = m_videoTextures[currentTextureIdx];
 
-            const ALXR::ViewProjectionConstantBuffer viewProjection{ .ViewID = viewID };
-            m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
+                const ALXR::ViewProjectionConstantBuffer viewProjection{ .ViewID = viewID };
+                m_deviceContext->UpdateSubresource(m_viewProjectionCBuffer.Get(), 0, nullptr, &viewProjection, 0, 0);
 
-            ID3D11Buffer* const constantBuffers[] = { m_viewProjectionCBuffer.Get() };
-            m_deviceContext->VSSetConstantBuffers(1, (UINT)std::size(constantBuffers), constantBuffers);
-            m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
+                ID3D11Buffer* const constantBuffers[] = { m_viewProjectionCBuffer.Get() };
+                m_deviceContext->VSSetConstantBuffers(1, (UINT)std::size(constantBuffers), constantBuffers);
+                m_deviceContext->VSSetShader(m_videoVertexShader.Get(), nullptr, 0);
 
-            if (const auto fovDecParmPtr = m_fovDecodeParams) {
-                alignas(16) const ALXR::FoveatedDecodeParams fdParam = *fovDecParmPtr;
-                m_deviceContext->UpdateSubresource(m_fovDecodeCBuffer.Get(), 0, nullptr, &fdParam, 0, 0);
-                ID3D11Buffer* const psConstantBuffers[] = { m_fovDecodeCBuffer.Get() };
-                m_deviceContext->PSSetConstantBuffers(2, (UINT)std::size(psConstantBuffers), psConstantBuffers);
-            }
-            const bool is3PlaneFormat = videoTex.chromaVSRV != nullptr;
-            m_deviceContext->PSSetShader(m_videoPixelShader[VideoShaderIndex(is3PlaneFormat, newMode)].Get(), nullptr, 0);
-            
-            const std::array<ID3D11ShaderResourceView*, 3> srvs {
-                videoTex.lumaSRV.Get(),
-                videoTex.chromaSRV.Get(),
-                videoTex.chromaVSRV.Get()
-            };
-            const UINT srvSize = is3PlaneFormat ? (UINT)srvs.size() : 2u;
-            m_deviceContext->PSSetShaderResources(0, srvSize, srvs.data());
-            
-            const std::array<ID3D11SamplerState*, 2> samplers = { m_lumaSampler.Get(), m_chromaSampler.Get() };
-            m_deviceContext->PSSetSamplers(0, (UINT)samplers.size(), samplers.data());
+                if (const auto fovDecParmPtr = m_fovDecodeParams) {
+                    alignas(16) const ALXR::FoveatedDecodeParams fdParam = *fovDecParmPtr;
+                    m_deviceContext->UpdateSubresource(m_fovDecodeCBuffer.Get(), 0, nullptr, &fdParam, 0, 0);
+                    ID3D11Buffer* const psConstantBuffers[] = { m_fovDecodeCBuffer.Get() };
+                    m_deviceContext->PSSetConstantBuffers(2, (UINT)std::size(psConstantBuffers), psConstantBuffers);
+                }
+                const bool is3PlaneFormat = videoTex.chromaVSRV != nullptr;
+                m_deviceContext->PSSetShader(m_videoPixelShader[VideoShaderIndex(is3PlaneFormat, newMode)].Get(), nullptr, 0);
 
-            m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            m_deviceContext->IASetInputLayout(nullptr);
-            m_deviceContext->Draw(3, 0);
-        });
+                const std::array<ID3D11ShaderResourceView*, 3> srvs{
+                    videoTex.lumaSRV.Get(),
+                    videoTex.chromaSRV.Get(),
+                    videoTex.chromaVSRV.Get()
+                };
+                const UINT srvSize = is3PlaneFormat ? (UINT)srvs.size() : 2u;
+                m_deviceContext->PSSetShaderResources(0, srvSize, srvs.data());
+
+                const std::array<ID3D11SamplerState*, 2> samplers = { m_lumaSampler.Get(), m_chromaSampler.Get() };
+                m_deviceContext->PSSetSamplers(0, (UINT)samplers.size(), samplers.data());
+
+                m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                m_deviceContext->IASetInputLayout(nullptr);
+                m_deviceContext->Draw(3, 0);
+            });
+        }
     }
 
     inline void SetEnvironmentBlendMode(const XrEnvironmentBlendMode newMode) {

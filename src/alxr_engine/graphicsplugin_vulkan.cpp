@@ -2949,12 +2949,20 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         return proj * view;
     }
 
-    template < typename RenderFunc >
-    inline void RenderViewImpl(const XrSwapchainImageBaseHeader* swapchainImage, RenderFunc&& renderFun) {
-
-        const auto swapchainContextPtr = m_swapchainImageContextMap[swapchainImage];
+    inline SwapchainImageContext& GetSwapchainImageContext(
+        const XrSwapchainImageBaseHeader* swapchainImage,
+        std::uint32_t& imageIndex
+    ) {
+        assert(swapchainImage != nullptr);
+        assert(m_swapchainImageContextMap.find(swapchainImage) != m_swapchainImageContextMap.end());
+        auto swapchainContextPtr = m_swapchainImageContextMap[swapchainImage];
         assert(swapchainContextPtr != nullptr);
-        const std::uint32_t imageIndex = swapchainContextPtr->ImageIndex(swapchainImage);
+        imageIndex = swapchainContextPtr->ImageIndex(swapchainImage);
+        return *swapchainContextPtr;
+    }
+
+    template < typename RenderFunc >
+    inline void RenderViewImpl(RenderFunc&& renderFun) {
 
         if (m_cmdBufferWaitNextFrame) {
             m_cmdBuffer.Wait();
@@ -2965,10 +2973,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 #endif
         m_cmdBuffer.Begin();
 
-        // Ensure depth is in the right layout
-        swapchainContextPtr->depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
-        renderFun(imageIndex, *swapchainContextPtr);
+        renderFun();
 
         m_cmdBuffer.End();
 #if 1 //#ifdef XR_USE_PLATFORM_ANDROID
@@ -3050,8 +3055,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         const std::vector<Cube>& cubes
     ) override {
         assert(m_isMultiViewSupported);
-        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
-        {
+        RenderViewImpl([&, this]() {
+
+            std::uint32_t imageIndex{0};
+            auto& swapchainContext = GetSwapchainImageContext(swapchainImage, imageIndex);
+            swapchainContext.depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
             const auto& clearValues = ConstClearValues[ClearValueIndex(newMode)];
             VkRenderPassBeginInfo renderPassBeginInfo{
                 .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -3099,47 +3108,56 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     void RenderView
     (
-        const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* swapchainImage,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
         const std::int64_t /*swapchainFormat*/, const PassthroughMode newMode,
         const std::vector<Cube>& cubes
     ) override {
-        assert(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported.
-        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
-        {
-            const auto& clearValues = ConstClearValues[ClearValueIndex(newMode)];
-            VkRenderPassBeginInfo renderPassBeginInfo{
-                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-                .pNext = nullptr,
-                .clearValueCount = (uint32_t)clearValues.size(),
-                .pClearValues = clearValues.data()
-            };
-            // Bind and clear eye render target
-            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+        RenderViewImpl([&, this]() {
+            for (std::size_t viewID = 0; viewID < layerViews.size(); ++viewID) {
 
-            vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, swapchainContext.pipe.pipe);
+                const auto& layerView = layerViews[viewID];
+                assert(layerView.subImage.imageArrayIndex == 0);  // Texture arrays not supported here.
 
-            // Bind index and vertex buffers
-            vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
-            constexpr const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
+                std::uint32_t imageIndex{0};
+                auto& swapchainContext = GetSwapchainImageContext(swapchainImages[viewID], imageIndex);
+                swapchainContext.depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-            // Compute the view-projection transform.
-            // Note all matrixes (including OpenXR's) are column-major, right-handed.
-            const Eigen::Matrix4f vp = MakeViewProjMatrix(layerView);
+                const auto& clearValues = ConstClearValues[ClearValueIndex(newMode)];
+                VkRenderPassBeginInfo renderPassBeginInfo{
+                    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                    .pNext = nullptr,
+                    .clearValueCount = (uint32_t)clearValues.size(),
+                    .pClearValues = clearValues.data()
+                };
+                // Bind and clear eye render target
+                swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
 
-            // Render each cube
-            for (const Cube& cube : cubes) {
-                // Compute the model-view-projection transform and push it.
-                const Eigen::Affine3f model = ALXR::CreateTRS(cube.Pose, cube.Scale);
-                alignas(16) const Eigen::Matrix4f mvp = (vp * model).matrix();
-                vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ViewProjectionUniform), mvp.data());
+                vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, swapchainContext.pipe.pipe);
 
-                // Draw the cube.
-                vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
+                // Bind index and vertex buffers
+                vkCmdBindIndexBuffer(m_cmdBuffer.buf, m_drawBuffer.idxBuf, 0, VK_INDEX_TYPE_UINT16);
+                constexpr const VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &m_drawBuffer.vtxBuf, &offset);
+
+                // Compute the view-projection transform.
+                // Note all matrixes (including OpenXR's) are column-major, right-handed.
+                const Eigen::Matrix4f vp = MakeViewProjMatrix(layerView);
+
+                // Render each cube
+                for (const Cube& cube : cubes) {
+                    // Compute the model-view-projection transform and push it.
+                    const Eigen::Affine3f model = ALXR::CreateTRS(cube.Pose, cube.Scale);
+                    alignas(16) const Eigen::Matrix4f mvp = (vp * model).matrix();
+                    vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ViewProjectionUniform), mvp.data());
+
+                    // Draw the cube.
+                    vkCmdDrawIndexed(m_cmdBuffer.buf, m_drawBuffer.count.idx, 1, 0, 0, 0);
+                }
+
+                vkCmdEndRenderPass(m_cmdBuffer.buf);
             }
-
-            vkCmdEndRenderPass(m_cmdBuffer.buf);
         });
     }
 
@@ -4147,8 +4165,12 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     ) override
     {
         assert(m_isMultiViewSupported);
-        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
-        {
+        RenderViewImpl([&, this]() {
+            
+            std::uint32_t imageIndex{ 0 };
+            auto& swapchainContext = GetSwapchainImageContext(swapchainImage, imageIndex);
+            swapchainContext.depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
             const auto& clearValues = VideoClearValues[ClearValueIndex(newMode)];
             VkRenderPassBeginInfo renderPassBeginInfo{
                 .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -4186,46 +4208,53 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     virtual void RenderVideoView
     (
-        const std::uint32_t viewID, const XrCompositionLayerProjectionView& /*layerView*/,
-        const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t /*swapchainFormat*/,
+        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
+        const std::int64_t /*swapchainFormat*/,
         const PassthroughMode mode /*= PassthroughMode::None*/
     ) override
     {
-        RenderViewImpl(swapchainImage, [&, this](const std::uint32_t imageIndex, auto& swapchainContext)
-        {
-            const auto& clearValues = VideoClearValues[ClearValueIndex(mode)];
-            VkRenderPassBeginInfo renderPassBeginInfo{
-                .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-                .pNext = nullptr,
-                .clearValueCount = (uint32_t)clearValues.size(),
-                .pClearValues = clearValues.data()
-            };
-            // Bind and clear eye render target
-            swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
+        RenderViewImpl([&, this]() {
+            for (std::size_t viewID = 0; viewID < swapchainImages.size(); ++viewID) {
+                
+                std::uint32_t imageIndex{ 0 };
+                auto& swapchainContext = GetSwapchainImageContext(swapchainImages[viewID], imageIndex);
+                swapchainContext.depthBuffer.TransitionLayout(&m_cmdBuffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-#ifdef XR_USE_PLATFORM_ANDROID
-            constexpr const std::size_t VidTextureIndex = VidTextureIndex::Current;
-#else
-            if (textureIdx == std::size_t(-1))
-                return;
-            const std::size_t VidTextureIndex = textureIdx;
-#endif
-            auto& currentTexture = m_videoTextures[VidTextureIndex];
-            if (currentTexture.texture.texImage == VK_NULL_HANDLE)
-                return;
-            currentTexture.texture.TransitionLayout(m_cmdBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                const auto& clearValues = VideoClearValues[ClearValueIndex(mode)];
+                VkRenderPassBeginInfo renderPassBeginInfo{
+                    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                    .pNext = nullptr,
+                    .clearValueCount = (uint32_t)clearValues.size(),
+                    .pClearValues = clearValues.data()
+                };
+                // Bind and clear eye render target
+                swapchainContext.BindRenderTarget(imageIndex, /*out*/ renderPassBeginInfo);
 
-            vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    #ifdef XR_USE_PLATFORM_ANDROID
+                constexpr const std::size_t VidTextureIndex = VidTextureIndex::Current;
+    #else
+                if (textureIdx == std::size_t(-1))
+                    return;
+                const std::size_t VidTextureIndex = textureIdx;
+    #endif
+                auto& currentTexture = m_videoTextures[VidTextureIndex];
+                if (currentTexture.texture.texImage == VK_NULL_HANDLE)
+                    return;
+                currentTexture.texture.TransitionLayout(m_cmdBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-            vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamPipelines[static_cast<std::size_t>(mode)].pipe);
+                vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-            assert(currentTexture.descriptorSet != VK_NULL_HANDLE);
-            vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamLayout.layout, 0, 1, &currentTexture.descriptorSet, 0, nullptr);
+                vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamPipelines[static_cast<std::size_t>(mode)].pipe);
 
-            vkCmdPushConstants(m_cmdBuffer.buf, m_videoStreamLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(std::uint32_t), &viewID);
-            vkCmdDraw(m_cmdBuffer.buf, 3, 1, 0, 0);
+                assert(currentTexture.descriptorSet != VK_NULL_HANDLE);
+                vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_videoStreamLayout.layout, 0, 1, &currentTexture.descriptorSet, 0, nullptr);
 
-            vkCmdEndRenderPass(m_cmdBuffer.buf);
+                vkCmdPushConstants(m_cmdBuffer.buf, m_videoStreamLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(std::uint32_t), &viewID);
+                vkCmdDraw(m_cmdBuffer.buf, 3, 1, 0, 0);
+
+                vkCmdEndRenderPass(m_cmdBuffer.buf);
+            }
         });
     }
 
