@@ -10,7 +10,7 @@ struct HeadlessGraphicsPlugin final : public IGraphicsPlugin {
     virtual std::vector<std::string> GetInstanceExtensions() const override { return {}; }
 
     // Create an instance of this graphics api for the provided instance and systemId.
-    virtual void InitializeDevice(XrInstance /*instance*/, XrSystemId /*systemId*/, const XrEnvironmentBlendMode /*newMode*/) override { return ; }
+    virtual void InitializeDevice(XrInstance /*instance*/, XrSystemId /*systemId*/, const XrEnvironmentBlendMode /*newMode*/, const bool /*enableVisibilityMask*/) override { return ; }
 
     // Select the preferred swapchain format from the list of available formats.
     virtual int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& /*runtimeFormats*/) const override { return 0; }

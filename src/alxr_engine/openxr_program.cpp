@@ -528,6 +528,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 #ifdef XR_USE_PLATFORM_ANDROID
         { XR_KHR_ANDROID_THREAD_SETTINGS_EXTENSION_NAME, false },
 #endif
+        { XR_KHR_VISIBILITY_MASK_EXTENSION_NAME, false },
         // EXT extensions
 #ifdef XR_USE_PLATFORM_UWP
 #pragma message ("UWP Extensions Enabled.")
@@ -873,7 +874,7 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         // The graphics API can initialize the graphics device now that the systemId and instance
         // handle are available.
-        m_graphicsPlugin->InitializeDevice(m_instance, m_systemId, m_environmentBlendMode);
+        m_graphicsPlugin->InitializeDevice(m_instance, m_systemId, m_environmentBlendMode, IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME));
         m_isMultiViewEnabled = m_graphicsPlugin->IsMultiViewEnabled();
         
         Log::Write(Log::Level::Info, m_isMultiViewEnabled ?
@@ -2247,6 +2248,79 @@ struct OpenXrProgram final : IOpenXrProgram {
                 m_swapchainImages.insert(std::make_pair(swapchain.handle, std::move(swapchainImages)));
             }
         }
+
+        if (IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME)) {
+
+            //while (!::IsDebuggerPresent())  {
+            //    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            //}
+            //__debugbreak();
+
+            PFN_xrGetVisibilityMaskKHR xrGetVisibilityMaskKHR = nullptr;
+            if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrGetVisibilityMaskKHR",
+                reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVisibilityMaskKHR))) ||
+                xrGetVisibilityMaskKHR == nullptr) {
+                Log::Write(Log::Level::Warning, "xrGetInstanceProcAddr failed to get address for xrGetVisibilityMaskKHR.");
+                return;
+            }
+
+            std::vector<std::uint32_t> indices;
+            std::vector<XrVector2f> vertices;
+            constexpr const XrVisibilityMaskTypeKHR visibilityMaskType = XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR;
+            for (std::uint32_t viewIdx = 0; viewIdx < viewCount; ++viewIdx) {
+
+                XrVisibilityMaskKHR visibilityMask = {
+                    .type = XR_TYPE_VISIBILITY_MASK_KHR,
+                    .next = nullptr,
+                    .vertexCapacityInput = 0,
+                    .vertexCountOutput = 0,
+                    .vertices = nullptr,
+                    .indexCapacityInput = 0,
+                    .indexCountOutput = 0,
+                    .indices = nullptr
+                };
+                auto result = xrGetVisibilityMaskKHR(
+                    m_session, m_viewConfigType, viewIdx,
+                    visibilityMaskType, &visibilityMask
+                );
+                if (XR_FAILED(result)) {
+                    Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
+                    return;
+                }
+                
+                indices.resize(visibilityMask.indexCountOutput);
+                visibilityMask.indexCapacityInput = visibilityMask.indexCountOutput;
+                visibilityMask.indices = indices.data();
+
+                vertices.resize(visibilityMask.vertexCountOutput, { 0,0 });
+                visibilityMask.vertexCapacityInput = visibilityMask.vertexCountOutput;
+                visibilityMask.vertices = vertices.data();
+
+                result = xrGetVisibilityMaskKHR(
+                    m_session, m_viewConfigType, viewIdx,
+                    visibilityMaskType, &visibilityMask
+                );
+                if (XR_FAILED(result)) {
+                    Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
+                    return;
+                }
+
+#if 0//def ALXR_DEBUG_VISIBILITY_MASK
+                for (std::size_t idx = 0; idx < vertices.size(); ++idx) {
+                    Log::Write(Log::Level::Verbose,
+                        Fmt("visibility mask vertex-%d: (%f, %f)", idx, vertices[idx].x, vertices[idx].y));
+                }
+                for (std::size_t idx = 0; idx < indices.size(); ++idx) {
+                    Log::Write(Log::Level::Verbose,
+                        Fmt("visibility mask index-%d: %u", idx, indices[idx]));
+                }
+#endif
+                if (!m_graphicsPlugin->SetVisibilityMask(viewIdx, visibilityMask)) {
+                    Log::Write(Log::Level::Error, Fmt("SetVisibilityMask failed"));
+                    return;
+                }
+            }
+        }
     }
 
     // Return event if one is available, otherwise return null.
@@ -2316,6 +2390,12 @@ struct OpenXrProgram final : IOpenXrProgram {
                     if (spaceChangedEvent.referenceSpaceType == appRefSpace)
                         enqueueGuardianChanged(spaceChangedEvent.changeTime);
                 }  break;
+                case XR_TYPE_EVENT_DATA_VISIBILITY_MASK_CHANGED_KHR: {
+                    const auto& visibilityMaskChangedEvent = *reinterpret_cast<const XrEventDataVisibilityMaskChangedKHR*>(event);
+                    Log::Write(Log::Level::Verbose,
+                               Fmt("visibility mask changed for view %d", visibilityMaskChangedEvent.viewIndex));
+                    break;
+                }
                 default: {
                     Log::Write(Log::Level::Verbose, Fmt("Ignoring event type %d", event->type));
                     break;

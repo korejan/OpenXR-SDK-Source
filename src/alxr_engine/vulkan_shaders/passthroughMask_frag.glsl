@@ -18,6 +18,8 @@ const vec3 key_color = vec3(KeyColorR, KeyColorG, KeyColorB);
 
 layout(location = 0) out vec4 FragColor;
 
+layout(early_fragment_tests) in;
+
 void main()
 {
     vec4 color = SampleVideoTexture();

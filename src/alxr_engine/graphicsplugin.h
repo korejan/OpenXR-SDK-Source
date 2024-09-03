@@ -8,6 +8,8 @@
 #undef None
 #endif
 
+struct XrVisibilityMaskKHR;
+
 namespace ALXR {
     struct FoveatedDecodeParams;
 }
@@ -52,7 +54,7 @@ struct IGraphicsPlugin {
     virtual std::vector<std::string> GetInstanceExtensions() const = 0;
 
     // Create an instance of this graphics api for the provided instance and systemId.
-    virtual void InitializeDevice(XrInstance instance, XrSystemId systemId, const XrEnvironmentBlendMode /*newMode*/) = 0;
+    virtual void InitializeDevice(XrInstance instance, XrSystemId systemId, const XrEnvironmentBlendMode /*newMode*/, const bool /*enableVisibilityMask*/) = 0;
 
     // Select the preferred swapchain format from the list of available formats.
     virtual int64_t SelectColorSwapchainFormat(const std::vector<int64_t>& runtimeFormats) const = 0;
@@ -161,6 +163,8 @@ struct IGraphicsPlugin {
     ) {}
 
     virtual void SetBlendModeParams(const float /*alpha*/ = 0.6f) {}
+
+    virtual bool SetVisibilityMask(uint32_t /*viewIndex*/, const struct XrVisibilityMaskKHR& /*visibilityMask*/) { return false; }
 };
 
 // Create a graphics plugin for the graphics API specified in the options.

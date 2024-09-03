@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <span>
 
 #ifdef USE_ONLINE_VULKAN_SHADERC
 #include <shaderc/shaderc.hpp>
@@ -588,11 +589,13 @@ struct ShaderProgram {
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
+            .module = VK_NULL_HANDLE,
             .pSpecializationInfo = nullptr
         },
         {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .pNext = nullptr,
+            .module = VK_NULL_HANDLE,
             .pSpecializationInfo = nullptr
         }
     }};
@@ -624,6 +627,15 @@ struct ShaderProgram {
     void LoadFragmentShader(const CodeBuffer& code, const char* const mainName=EntryPoint) { Load(1, code, mainName); }
     
     void Init(VkDevice device) { m_vkDevice = device; }
+
+    bool AllLoaded() const {
+        for (const auto& si : shaderInfo) {
+            if (si.module == VK_NULL_HANDLE) {
+                return false;
+            }
+        }
+        return true;
+    }
 
    private:
     VkDevice m_vkDevice{VK_NULL_HANDLE};
@@ -661,6 +673,7 @@ struct ShaderProgram {
     }
 };
 
+using VertexInputAttributeDescriptionSet = std::vector<VkVertexInputAttributeDescription>;
 // VertexBuffer base class
 struct VertexBufferBase {
     VkBuffer idxBuf{VK_NULL_HANDLE};
@@ -668,7 +681,7 @@ struct VertexBufferBase {
     VkBuffer vtxBuf{VK_NULL_HANDLE};
     VkDeviceMemory vtxMem{VK_NULL_HANDLE};
     VkVertexInputBindingDescription bindDesc{};
-    std::vector<VkVertexInputAttributeDescription> attrDesc{};
+    VertexInputAttributeDescriptionSet attrDesc{};
     struct {
         uint32_t idx;
         uint32_t vtx;
@@ -676,7 +689,7 @@ struct VertexBufferBase {
 
     VertexBufferBase() = default;
 
-    ~VertexBufferBase() {
+    void Clear() {
         if (m_vkDevice != VK_NULL_HANDLE) {
             if (idxBuf != VK_NULL_HANDLE) {
                 vkDestroyBuffer(m_vkDevice, idxBuf, nullptr);
@@ -700,6 +713,7 @@ struct VertexBufferBase {
         count = {0, 0};
         m_vkDevice = VK_NULL_HANDLE;
     }
+    ~VertexBufferBase() { Clear(); }
 
     VertexBufferBase(const VertexBufferBase&) = delete;
     VertexBufferBase& operator=(const VertexBufferBase&) = delete;
@@ -755,9 +769,18 @@ struct VertexBuffer final : public VertexBufferBase {
     }
 
     inline void UpdateIndices(const std::uint16_t* data, const std::uint32_t size, const std::uint32_t offset = 0) {
-        uint16_t* map = nullptr;
+        std::uint16_t* map = nullptr;
         CHECK_VKCMD(vkMapMemory(m_vkDevice, idxMem, sizeof(map[0]) * offset, sizeof(map[0]) * size, 0, (void**)&map));
         std::copy_n(data, size, map);
+        vkUnmapMemory(m_vkDevice, idxMem);
+    }
+
+    inline void UpdateIndices(const std::uint32_t* data, const std::uint32_t size, const std::uint32_t offset = 0) {
+        std::uint16_t* map = nullptr;
+        CHECK_VKCMD(vkMapMemory(m_vkDevice, idxMem, sizeof(map[0]) * offset, sizeof(map[0]) * size, 0, (void**)&map));
+        for (std::uint32_t idx = 0; idx < size; ++idx) {
+            map[idx] = static_cast<std::uint16_t>(data[idx]);
+        }
         vkUnmapMemory(m_vkDevice, idxMem);
     }
 
@@ -1436,18 +1459,20 @@ struct Texture {
 
 // RenderPass wrapper
 struct RenderPass {
-    VkFormat colorFmt{};
-    VkFormat depthFmt{};
+    VkFormat colorFmt{VK_FORMAT_UNDEFINED};
+    VkFormat depthFmt{VK_FORMAT_UNDEFINED};
     VkRenderPass pass{VK_NULL_HANDLE};
     std::uint32_t arraySize = 0;
+    bool enableVisibilityMask = false;
 
     RenderPass() = default;
 
-    bool Create(VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt, const std::uint32_t arraySizeParam) {
+    bool Create(VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt, const std::uint32_t arraySizeParam, const bool visibilityMask) {
         m_vkDevice = device;
         colorFmt = aColorFmt;
         depthFmt = aDepthFmt;
         arraySize = arraySizeParam;
+        enableVisibilityMask = visibilityMask;
         assert(arraySize > 0);
         const bool isMultiView = arraySize > 1;
 
@@ -1532,9 +1557,12 @@ struct RenderPass {
                 .samples = VK_SAMPLE_COUNT_1_BIT,
                 .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED, //VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .stencilLoadOp = enableVisibilityMask ?
+                    VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .stencilStoreOp = enableVisibilityMask ?
+                    VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                .initialLayout = enableVisibilityMask ?
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED,
                 .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
             };
             subpass.pDepthStencilAttachment = &depthRef;
@@ -1677,7 +1705,7 @@ struct RenderTarget {
                     .a = VK_COMPONENT_SWIZZLE_A
                 },
                 .subresourceRange {
-                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
                     .baseMipLevel = 0,
                     .levelCount = 1,
                     .baseArrayLayer = 0,
@@ -1985,6 +2013,23 @@ struct Pipeline {
             .scissorCount = 1,
             .pScissors = &scissor,
         };
+        VkStencilOpState stencilOpState = {
+            .failOp = VK_STENCIL_OP_KEEP,
+            .passOp = VK_STENCIL_OP_KEEP,
+            .depthFailOp = VK_STENCIL_OP_KEEP,
+            .compareOp = VK_COMPARE_OP_ALWAYS,
+        };
+        if (rp.enableVisibilityMask) {
+            stencilOpState = {
+                .failOp = VK_STENCIL_OP_KEEP,         // Keep current value on stencil test fail
+                .passOp = VK_STENCIL_OP_KEEP,         // Keep current value on depth test pass
+                .depthFailOp = VK_STENCIL_OP_KEEP,    // Keep current value on depth test fail
+                .compareOp = VK_COMPARE_OP_NOT_EQUAL, // Only pass if stencil value (not) equals the reference
+                .compareMask = 0xFF,                  // Comparison mask
+                .writeMask = 0x00,                    // Disable writing to stencil (read-only)
+                .reference = 1,                       // Reference value for comparison
+            };
+        }
         const VkPipelineDepthStencilStateCreateInfo ds {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .pNext = nullptr,
@@ -1992,14 +2037,9 @@ struct Pipeline {
             .depthWriteEnable = VK_TRUE,
             .depthCompareOp = VK_COMPARE_OP_LESS,
             .depthBoundsTestEnable = VK_FALSE,
-            .stencilTestEnable = VK_FALSE,
-            .front {
-                .failOp = VK_STENCIL_OP_KEEP,
-                .passOp = VK_STENCIL_OP_KEEP,
-                .depthFailOp = VK_STENCIL_OP_KEEP,
-                .compareOp = VK_COMPARE_OP_ALWAYS,
-            },
-            .back = ds.front,
+            .stencilTestEnable = rp.enableVisibilityMask ? VK_TRUE : VK_FALSE,
+            .front = stencilOpState,
+            .back = stencilOpState,
             .minDepthBounds = 0.0f,
             .maxDepthBounds = 1.0f,
         };
@@ -2132,7 +2172,7 @@ struct DepthBuffer {
             .oldLayout = m_vkLayout,
             .newLayout = newLayout,
             .image = depthImage,
-            .subresourceRange { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1},
+            .subresourceRange { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1},
         };
         vkCmdPipelineBarrier(cmdBuffer->buf, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, nullptr,
                              0, nullptr, 1, &depthBarrier);
@@ -2167,7 +2207,8 @@ struct SwapchainImageContext {
     (
         VkDevice device, MemoryAllocator* memAllocator, uint32_t capacity,
         const XrSwapchainCreateInfo& swapchainCreateInfo, const PipelineLayout& layout,
-        const ShaderProgram& sp, const VertexBuffer<Geometry::Vertex>& vb
+        const ShaderProgram& sp, const VertexBuffer<Geometry::Vertex>& vb,
+        const bool enableVisibilityMask
     )
     {
         m_vkDevice = device;
@@ -2176,11 +2217,11 @@ struct SwapchainImageContext {
         size = {swapchainCreateInfo.width, swapchainCreateInfo.height};
 
         const VkFormat colorFormat = static_cast<VkFormat>(swapchainCreateInfo.format);
-        const VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+        const VkFormat depthFormat = enableVisibilityMask ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_D32_SFLOAT;
         // XXX handle swapchainCreateInfo.sampleCount
         
         depthBuffer.Create(m_vkDevice, memAllocator, depthFormat, swapchainCreateInfo);
-        rp.Create(m_vkDevice, colorFormat, depthFormat, arraySize);
+        rp.Create(m_vkDevice, colorFormat, depthFormat, arraySize, enableVisibilityMask);
         pipe.Create(m_vkDevice, size, layout, rp, sp, &vb);
 
         swapchainImages.resize(capacity);
@@ -2436,7 +2477,8 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         Log::Write(Log::Level::Verbose, "Vulkan debug utils initialized");
     }
 
-    void InitializeDevice(XrInstance instance, XrSystemId systemId, const XrEnvironmentBlendMode newMode) override {
+    void InitializeDevice(XrInstance instance, XrSystemId systemId, const XrEnvironmentBlendMode newMode, const bool enableVisibilityMask) override {
+        m_visibilityMaskEnabled = enableVisibilityMask;
         // Create the Vulkan device for the adapter associated with the system.
         // Extension function must be loaded by name
         XrGraphicsRequirementsVulkan2KHR graphicsRequirements{ .type=XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR, .next=nullptr };
@@ -2926,7 +2968,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         SwapchainImageContext& swapchainImageContext = m_swapchainImageContexts.back();
 
         std::vector<XrSwapchainImageBaseHeader*> bases = swapchainImageContext.Create(
-            m_vkDevice, &m_memAllocator, capacity, swapchainCreateInfo, m_pipelineLayout, m_shaderProgram, m_drawBuffer);
+            m_vkDevice, &m_memAllocator, capacity, swapchainCreateInfo,
+            m_pipelineLayout, m_shaderProgram, m_drawBuffer, m_visibilityMaskEnabled
+        );
 
         // Map every swapchainImage base pointer to this context
         for (auto& base : bases) {
@@ -2938,8 +2982,14 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     virtual void ClearSwapchainImageStructs() override
     {
+        if (m_vkQueue != VK_NULL_HANDLE)
+            vkQueueWaitIdle(m_vkQueue);
         m_swapchainImageContextMap.clear();
         m_swapchainImageContexts.clear();
+        if (m_visibilityMask.pipe != VK_NULL_HANDLE) {
+            vkDestroyPipeline(m_vkDevice, m_visibilityMask.pipe, nullptr);
+            m_visibilityMask.pipe = VK_NULL_HANDLE;
+        }
     }
 
     static inline Eigen::Matrix4f MakeViewProjMatrix(const XrCompositionLayerProjectionView& layerView) {
@@ -3046,6 +3096,151 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         return m_clearColorIndex;
     }
 
+    struct DepthStencilView final {
+        VkExtent2D size{};
+        VkImageView imageView{ VK_NULL_HANDLE };
+        VkFramebuffer frameBuffer{ VK_NULL_HANDLE };
+        bool IsValid() const { return imageView != VK_NULL_HANDLE && frameBuffer != VK_NULL_HANDLE; }
+    };
+    using DepthStencilViewList = std::array<DepthStencilView, 2>;
+    DepthStencilViewList CreateDepthStencilViewsFromImageArray(
+        std::span<XrSwapchainImageBaseHeader* const> swapchainImages,
+        VkRenderPass renderPass
+    ) {
+        assert(swapchainImages.size() > 0 && swapchainImages.size() < 3);
+        const bool isMultiView = swapchainImages.size() == 1;
+
+        DepthStencilViewList depthStencilViews = {};
+        for (std::size_t viewIdx = 0; viewIdx < depthStencilViews.size(); ++viewIdx) {
+
+            auto swapchainImage = swapchainImages[isMultiView ? 0 : viewIdx];
+            std::uint32_t imageIndex{ 0 };
+            auto& swapchainContext = GetSwapchainImageContext(swapchainImage, imageIndex);
+            assert(swapchainContext.depthBuffer.depthImage != VK_NULL_HANDLE);
+
+            const VkImageViewCreateInfo depthViewInfo{
+                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .image = swapchainContext.depthBuffer.depthImage,
+                .viewType = VK_IMAGE_VIEW_TYPE_2D,
+                .format = VK_FORMAT_D32_SFLOAT_S8_UINT,
+                .components {
+                    .r = VK_COMPONENT_SWIZZLE_R,
+                    .g = VK_COMPONENT_SWIZZLE_G,
+                    .b = VK_COMPONENT_SWIZZLE_B,
+                    .a = VK_COMPONENT_SWIZZLE_A
+                },
+                .subresourceRange {
+                    .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = isMultiView ? (std::uint32_t)viewIdx : 0,
+                    .layerCount = 1
+                }
+            };
+            DepthStencilView depthStencilView = {};
+            if (vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthStencilView.imageView) != VK_SUCCESS) {
+                Log::Write(Log::Level::Error, "Failed to create depth-stencil view");
+                return {};
+            }
+            const VkFramebufferCreateInfo fbInfo = {
+                .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .renderPass = renderPass,
+                .attachmentCount = 1,
+                .pAttachments = &depthStencilView.imageView,
+                .width = swapchainContext.size.width,
+                .height = swapchainContext.size.height,
+                .layers = 1
+            };
+            if (vkCreateFramebuffer(m_vkDevice, &fbInfo, nullptr, &depthStencilView.frameBuffer) != VK_SUCCESS) {
+                Log::Write(Log::Level::Error, "Failed to create framebufferfrom depth-stencil view");
+                return {};
+            }
+            depthStencilView.size = swapchainContext.size;
+            depthStencilViews[viewIdx] = depthStencilView;
+        }
+        return depthStencilViews;
+    }
+
+    inline bool RenderVisibilityMaskPass(
+        std::span<XrSwapchainImageBaseHeader* const> swapchainImages,
+        const std::array<XrCompositionLayerProjectionView,2>& layerViews
+    ) {
+        //while (!::IsDebuggerPresent()) {
+        //    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        //}
+        //__debugbreak();
+
+        if (!m_visibilityMask.isDirty)
+            return true;
+
+        assert(m_visibilityMaskEnabled);
+        assert(swapchainImages.size() > 0 && swapchainImages.size() < 3);
+        assert(layerViews.size() > 0);
+
+        const bool isMultiView = swapchainImages.size() == 1;
+        assert(isMultiView == m_isMultiViewSupported);
+
+        auto depthStencialViews = CreateDepthStencilViewsFromImageArray(
+            swapchainImages,
+            m_visibilityMask.pass
+        );
+        if (!depthStencialViews[0].IsValid() ||
+            !depthStencialViews[1].IsValid()) {
+            return false;
+        }
+        RenderViewImpl([&, this]() {
+            for (std::size_t viewIdx = 0; viewIdx < depthStencialViews.size(); ++viewIdx)
+            {
+                auto& depthStencialView = depthStencialViews[viewIdx];
+                VkRenderPassBeginInfo renderPassBeginInfo = {
+                    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+                    .pNext = nullptr,
+                    .renderPass = m_visibilityMask.pass,
+                    .framebuffer = depthStencialView.frameBuffer,
+                    .renderArea = {
+                        .offset = {0, 0},
+                        .extent = depthStencialView.size,
+                    },
+                    .clearValueCount = 1,
+                    .pClearValues = &ClearDepthStencilValue,
+                };
+                renderPassBeginInfo.renderPass = m_visibilityMask.pass;
+
+                vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdBindPipeline(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_visibilityMask.pipe);
+
+                // Bind index and vertex buffers
+                const auto& vb = m_visibilityMask.vertexBuffer[viewIdx];
+                vkCmdBindIndexBuffer(m_cmdBuffer.buf, vb.idxBuf, 0, VK_INDEX_TYPE_UINT16);
+                constexpr const VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vb.vtxBuf, &offset);
+
+                const auto& pipeLayout = m_visibilityMask.pipeLayout;
+                alignas(16) const auto mvp = ALXR::CreateProjectionFov(ALXR::GraphicsAPI::Vulkan, layerViews[viewIdx].fov, 0.05f, 100.0f);
+                vkCmdPushConstants(m_cmdBuffer.buf, pipeLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ViewProjectionUniform), mvp.data());
+                vkCmdDrawIndexed(m_cmdBuffer.buf, vb.count.idx, 1, 0, 0, 0);
+
+                vkCmdEndRenderPass(m_cmdBuffer.buf);
+            }
+        });
+        
+        if (m_cmdBufferWaitNextFrame) { // Don't wait next frame to wait!
+            m_cmdBuffer.Wait();
+            m_cmdBuffer.Reset();
+        }
+        for (auto& depthStencialView : depthStencialViews) {
+            if (depthStencialView.frameBuffer != VK_NULL_HANDLE)
+                vkDestroyFramebuffer(m_vkDevice, depthStencialView.frameBuffer, nullptr);
+            if (depthStencialView.imageView != VK_NULL_HANDLE)
+                vkDestroyImageView(m_vkDevice, depthStencialView.imageView, nullptr);
+        }
+        m_visibilityMask.isDirty = false;
+        return true;
+    }
+
     void RenderMultiView
     (
         const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
@@ -3055,6 +3250,11 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         const std::vector<Cube>& cubes
     ) override {
         assert(m_isMultiViewSupported);
+        std::array<XrSwapchainImageBaseHeader*,1> swapchainImages = {
+            const_cast<XrSwapchainImageBaseHeader*>(swapchainImage)
+        };
+        RenderVisibilityMaskPass(swapchainImages, layerViews);
+
         RenderViewImpl([&, this]() {
 
             std::uint32_t imageIndex{0};
@@ -3113,6 +3313,9 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         const std::int64_t /*swapchainFormat*/, const PassthroughMode newMode,
         const std::vector<Cube>& cubes
     ) override {
+        
+        RenderVisibilityMaskPass(swapchainImages, layerViews);
+
         RenderViewImpl([&, this]() {
             for (std::size_t viewID = 0; viewID < layerViews.size(); ++viewID) {
 
@@ -4159,12 +4362,17 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     virtual void RenderVideoMultiView
     (
-        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
         const XrSwapchainImageBaseHeader* swapchainImage, const std::int64_t /*swapchainFormat*/,
         const PassthroughMode newMode /*= PassthroughMode::None*/
     ) override
     {
         assert(m_isMultiViewSupported);
+        std::array<XrSwapchainImageBaseHeader*, 1> swapchainImages = {
+            const_cast<XrSwapchainImageBaseHeader*>(swapchainImage)
+        };
+        RenderVisibilityMaskPass(swapchainImages, layerViews);
+
         RenderViewImpl([&, this]() {
             
             std::uint32_t imageIndex{ 0 };
@@ -4208,12 +4416,14 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
 
     virtual void RenderVideoView
     (
-        const std::array<XrCompositionLayerProjectionView, 2>& /*layerViews*/,
+        const std::array<XrCompositionLayerProjectionView, 2>& layerViews,
         const std::array<XrSwapchainImageBaseHeader*, 2>& swapchainImages,
         const std::int64_t /*swapchainFormat*/,
         const PassthroughMode mode /*= PassthroughMode::None*/
     ) override
     {
+        RenderVisibilityMaskPass(swapchainImages, layerViews);
+
         RenderViewImpl([&, this]() {
             for (std::size_t viewID = 0; viewID < swapchainImages.size(); ++viewID) {
                 
@@ -4267,6 +4477,331 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     virtual inline bool IsMultiViewEnabled() const override {
         return m_isMultiViewSupported;
     }
+
+    bool CreateVisiblityMaskShaders() {
+        if (!m_visibilityMaskEnabled)
+            return false;
+        if (m_visibilityMask.shaderProgram.AllLoaded())
+            return true;
+
+        CodeBuffer vertexSPIRV, fragmentSPIRV;
+        //if (IsMultiViewEnabled()) {
+        //    vertexSPIRV =
+        //        SPV_PREFIX
+        //            #include "shaders/multiview/visibilityMask_vert.spv"
+        //        SPV_SUFFIX;
+        //    fragmentSPIRV =
+        //        SPV_PREFIX
+        //            #include "shaders/multiview/noop_frag.spv"
+        //        SPV_SUFFIX;
+        //} else {
+            vertexSPIRV =
+                SPV_PREFIX
+                    #include "shaders/visibilityMask_vert.spv"
+                SPV_SUFFIX;
+            fragmentSPIRV =
+                SPV_PREFIX
+                    #include "shaders/noop_frag.spv"
+                SPV_SUFFIX;
+        //}
+
+        if (vertexSPIRV.empty()) {
+            Log::Write(Log::Level::Error, "Failed to compile visiblity mask vertex shader");
+            return false;
+        }
+        if (fragmentSPIRV.empty()) {
+            Log::Write(Log::Level::Error, "Failed to compile visiblity mask vertex shader");
+            return false;
+        }
+
+        m_visibilityMask.shaderProgram.Init(m_vkDevice);
+        m_visibilityMask.shaderProgram.LoadVertexShader(vertexSPIRV);
+        m_visibilityMask.shaderProgram.LoadFragmentShader(fragmentSPIRV);
+        return m_visibilityMask.shaderProgram.AllLoaded();
+    }
+
+    bool CreateVisibilityMaskRenderPass() {
+        if (!m_visibilityMaskEnabled)// || m_swapchainImageContexts.empty())
+            return false;
+        if (m_visibilityMask.pass != VK_NULL_HANDLE)
+            return true;
+
+        //const auto& swapChainInfo = m_swapchainImageContexts.back();        
+        //const bool isMultiView = swapChainInfo.arraySize > 1;
+
+        //// Subpass dependencies for layout transitions
+        //constexpr static const std::array<const VkSubpassDependency, 1> dependencies = {
+        //    VkSubpassDependency {
+        //        .srcSubpass = VK_SUBPASS_EXTERNAL,
+        //        .dstSubpass = 0,
+        //        .srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        //        .dstStageMask    = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+        //        .srcAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
+        //        .dstAccessMask   = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+        //        .dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+        //    },
+        //};
+        //constexpr static const std::uint32_t viewMask = 0b00000011;
+        //constexpr static const std::uint32_t correlationMask = 0b00000011;
+        //constexpr static const VkRenderPassMultiviewCreateInfoKHR renderPassMultiviewCI = {
+        //    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO_KHR,
+        //    .pNext = nullptr,
+        //    .subpassCount = 1,
+        //    .pViewMasks = &viewMask,
+        //    .correlationMaskCount = 1,
+        //    .pCorrelationMasks = &correlationMask,
+        //};
+        constexpr const VkAttachmentReference colorRef = {
+            .attachment = VK_ATTACHMENT_UNUSED,
+            .layout = VK_IMAGE_LAYOUT_UNDEFINED
+        };
+        constexpr const VkAttachmentReference depthRef = {
+            .attachment = 0,
+            .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        };
+        const VkSubpassDescription subpass = {
+            .flags = 0,
+            .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colorRef,
+            .pDepthStencilAttachment = &depthRef
+        };
+        const std::array<VkAttachmentDescription, 1> at = {
+            VkAttachmentDescription {
+                .format         = VK_FORMAT_D32_SFLOAT_S8_UINT,
+                .samples        = VK_SAMPLE_COUNT_1_BIT,
+                .loadOp         = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                .stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                .stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE,
+                .initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED,
+                .finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            }
+        };
+        VkRenderPassCreateInfo rpInfo{
+            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+            .pNext = nullptr, //isMultiView ? &renderPassMultiviewCI : nullptr,
+            .attachmentCount = (uint32_t)at.size(),
+            .pAttachments = at.data(),
+            .subpassCount = 1,
+            .pSubpasses = &subpass,
+            .dependencyCount = 0, //isMultiView ? (std::uint32_t)dependencies.size() : 0,
+            .pDependencies = nullptr, // isMultiView ? dependencies.data() : nullptr
+        };
+        m_visibilityMask.pass = VK_NULL_HANDLE;
+        if (vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &m_visibilityMask.pass) != VK_SUCCESS) {
+            Log::Write(Log::Level::Error, "Failed to create visibility mask render pass");
+            return false;
+        }
+        Log::Write(Log::Level::Verbose, "Visibility mask render pass created.");
+        return m_visibilityMask.pass != VK_NULL_HANDLE;
+    }
+
+    bool CreateVisibilityMaskPipeline() {
+        if (!m_visibilityMaskEnabled)
+            return false;
+        if (m_visibilityMask.pipe != VK_NULL_HANDLE) {
+            assert(m_visibilityMask.pipeLayout != VK_NULL_HANDLE);
+            assert(m_visibilityMask.pipe != VK_NULL_HANDLE);
+            assert(m_visibilityMask.shaderProgram.AllLoaded());
+            return true;
+        }
+
+        if (m_swapchainImageContexts.empty()) {
+            Log::Write(Log::Level::Error, "Failed to create visibility mask pipeline, No swapchain image contexts available, ");
+            return false;
+        }
+
+        if (!CreateVisiblityMaskShaders())
+            return false;
+        if (!CreateVisibilityMaskRenderPass())
+            return false;
+
+        assert(m_swapchainImageContexts.size() > 0);
+        const auto& swapChainInfo = m_swapchainImageContexts.back();
+        const auto& size = swapChainInfo.size;
+        //const bool isMultiView = swapChainInfo.arraySize > 1;
+
+        if (m_visibilityMask.pipeLayout == VK_NULL_HANDLE) {
+            static_assert(sizeof(MultiViewProjectionUniform) <= 128);
+            static_assert(sizeof(ViewProjectionUniform) <= 128);
+            // MVP matrix is a push_constant
+            const VkPushConstantRange pcr = {
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                .offset = 0,
+                .size = (std::uint32_t)sizeof(ViewProjectionUniform), //(isMultiView ? sizeof(MultiViewProjectionUniform) : sizeof(ViewProjectionUniform)),
+            };
+            const VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .pNext = nullptr,
+                .pushConstantRangeCount = 1,
+                .pPushConstantRanges = &pcr
+            };
+            if (vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutInfo, nullptr, &m_visibilityMask.pipeLayout) != VK_SUCCESS ||
+                m_visibilityMask.pipeLayout == VK_NULL_HANDLE) {
+                Log::Write(Log::Level::Error, "Failed to create pipeline layout for visibility mask rendering");
+                return false;
+            }
+            Log::Write(Log::Level::Verbose, "Created pipeline layout for visibility mask rendering");
+        }
+        assert(m_visibilityMask.pipeLayout != VK_NULL_HANDLE);
+
+        const auto& vb = m_visibilityMask.vertexBuffer[0];
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .vertexBindingDescriptionCount = 1u,
+            .pVertexBindingDescriptions = &vb.bindDesc,
+            .vertexAttributeDescriptionCount = (uint32_t)vb.attrDesc.size(),
+            .pVertexAttributeDescriptions = vb.attrDesc.data(),
+        };
+        constexpr const VkPipelineInputAssemblyStateCreateInfo inputAssembly = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = VK_FALSE
+        };
+        const VkRect2D scissor = { {0, 0}, size };
+#if defined(ORIGIN_BOTTOM_LEFT)
+        // Flipped view so origin is bottom-left like GL (requires VK_KHR_maintenance1)
+        const VkViewport viewport = { 0.0f, (float)size.height, (float)size.width, -(float)size.height, 0.0f, 1.0f };
+#else
+        // Will invert y after projection
+        const VkViewport viewport = { 0.0f, 0.0f, (float)size.width, (float)size.height, 0.0f, 1.0f };
+#endif
+        const VkPipelineViewportStateCreateInfo viewportState = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .viewportCount = 1,
+            .pViewports = &viewport,
+            .scissorCount = 1,
+            .pScissors = &scissor,
+        };
+        constexpr const VkPipelineRasterizationStateCreateInfo rasterizer = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .lineWidth = 1.0f,                        
+        };
+        constexpr const VkPipelineMultisampleStateCreateInfo multisampling = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+            .sampleShadingEnable = VK_FALSE,
+            .minSampleShading = 0.0f,
+            .pSampleMask = nullptr,
+            .alphaToCoverageEnable = VK_FALSE,
+            .alphaToOneEnable = VK_FALSE,
+        };
+        constexpr const VkStencilOpState stencilOpState = {
+            .failOp = VK_STENCIL_OP_KEEP,
+            .passOp = VK_STENCIL_OP_REPLACE,
+            .depthFailOp = VK_STENCIL_OP_KEEP,
+            .compareOp = VK_COMPARE_OP_ALWAYS,
+            .compareMask = 0xFF,
+            .writeMask = 0xFF,
+            .reference = 1,
+        };
+        constexpr const VkPipelineDepthStencilStateCreateInfo depthStencil = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .depthTestEnable = VK_FALSE,
+            .depthWriteEnable = VK_FALSE,
+            .depthCompareOp = VK_COMPARE_OP_ALWAYS,
+            .depthBoundsTestEnable = VK_FALSE,
+            .stencilTestEnable = VK_TRUE,
+            .front = stencilOpState,
+            .back = stencilOpState,
+            .minDepthBounds = 0.0f,
+            .maxDepthBounds = 1.0f,
+        };
+        constexpr const VkPipelineColorBlendAttachmentState colorBlendAttachment = {
+            .blendEnable = VK_FALSE,
+            .colorWriteMask = 0x0,
+        };
+        /*constexpr*/ const VkPipelineColorBlendStateCreateInfo colorBlending = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .logicOpEnable = VK_FALSE,
+            .logicOp = VK_LOGIC_OP_NO_OP,
+            .attachmentCount = 1,
+            .pAttachments = &colorBlendAttachment,
+        };
+        const std::array<VkPipelineShaderStageCreateInfo,2> shaderStages = {
+            VkPipelineShaderStageCreateInfo {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                .module = m_visibilityMask.shaderProgram.shaderInfo[0].module,
+                .pName = "main",
+            },
+            VkPipelineShaderStageCreateInfo {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                .module = m_visibilityMask.shaderProgram.shaderInfo[1].module,
+                .pName = "main",
+            },
+        };
+        const VkGraphicsPipelineCreateInfo pipelineInfo = {
+            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+            .pNext = nullptr,
+            .stageCount = (std::uint32_t)shaderStages.size(),
+            .pStages = shaderStages.data(),
+            .pVertexInputState = &vertexInputInfo,
+            .pInputAssemblyState = &inputAssembly,
+            .pViewportState = &viewportState,
+            .pRasterizationState = &rasterizer,
+            .pMultisampleState = &multisampling,
+            .pDepthStencilState = &depthStencil,
+            .pColorBlendState = &colorBlending,
+            .layout = m_visibilityMask.pipeLayout,
+            .renderPass = m_visibilityMask.pass,
+            .subpass = 0,
+        };
+        if (vkCreateGraphicsPipelines(m_vkDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_visibilityMask.pipe) != VK_SUCCESS) {
+            Log::Write(Log::Level::Error, "Failed to create graphics pipeline for visibility mask rendering");
+            return false;
+        }
+        Log::Write(Log::Level::Verbose, "Visibility mask pipeline created.");
+        return true;
+    }
+
+    virtual bool SetVisibilityMask(uint32_t viewIndex, const struct XrVisibilityMaskKHR& visibilityMask) override {
+
+        if (!m_visibilityMaskEnabled) {
+            Log::Write(Log::Level::Warning, "Attempting to set a visibility mask when not enabled.");
+            return false;
+        }
+
+        auto& visMaskBuffer = m_visibilityMask.vertexBuffer[viewIndex];
+
+        if (visibilityMask.vertexCountOutput > visMaskBuffer.count.vtx ||
+            visibilityMask.indexCountOutput > visMaskBuffer.count.idx) {
+            visMaskBuffer.Clear();
+            visMaskBuffer.Init(m_vkDevice, &m_memAllocator, { {0, 0, VK_FORMAT_R32G32_SFLOAT, 0} });
+            if (!visMaskBuffer.Create(visibilityMask.indexCountOutput, visibilityMask.vertexCountOutput)) {
+                Log::Write(Log::Level::Error, "Failed to create visibility mask vertex buffer.");
+                return false;
+            }
+        }
+
+        visMaskBuffer.UpdateIndices(visibilityMask.indices, visibilityMask.indexCountOutput, 0);
+        visMaskBuffer.UpdateVertices(visibilityMask.vertices, visibilityMask.vertexCountOutput, 0);
+
+        if (!CreateVisibilityMaskPipeline()) {
+            visMaskBuffer.Clear();
+            Log::Write(Log::Level::Error, "Failed to create visibility mask pipeline.");
+            return false;
+        }
+
+        m_visibilityMask.isDirty = true;
+        Log::Write(Log::Level::Info, "Visibility mask updated.");
+        return true;
+    }
     
     virtual ~VulkanGraphicsPlugin() override {
         ClearImageDescriptorSets();
@@ -4305,6 +4840,17 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     PipelineLayout m_pipelineLayout{};
     VertexBuffer<Geometry::Vertex> m_drawBuffer{};
     bool m_isMultiViewSupported = false;
+
+    struct VisibilityMaskData final {
+        using MaskVB = VertexBuffer<XrVector2f>;
+        std::array<MaskVB,2> vertexBuffer{};
+        VkRenderPass         pass{VK_NULL_HANDLE};
+        ShaderProgram        shaderProgram{};
+        VkPipelineLayout     pipeLayout{VK_NULL_HANDLE};
+        VkPipeline           pipe{VK_NULL_HANDLE};
+        std::atomic_bool     isDirty{false};
+    } m_visibilityMask;
+    bool m_visibilityMaskEnabled = false;
 
 // BEGIN VIDEO STREAM DATA /////////////////////////////////////////////////////////////
     std::array<std::uint8_t, VK_UUID_SIZE> m_vkDeviceUUID{};

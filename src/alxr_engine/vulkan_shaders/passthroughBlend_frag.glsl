@@ -13,6 +13,8 @@ layout(constant_id = 23) const float AlphaValue = 0.6f;
 
 layout(location = 0) out vec4 FragColor;
 
+layout(early_fragment_tests) in;
+
 void main()
 {
     FragColor = vec4(SampleVideoTexture().rgb, AlphaValue);
