@@ -123,6 +123,18 @@ struct ALXREyeInfo
     float ipd;
 };
 
+typedef struct ALXRHiddenAreaMesh {
+    const ALXRVector2f* vertices;
+    uint32_t vertexCount;
+    const uint32_t* indices;
+    uint32_t indexCount;
+} ALXRHiddenAreaMesh;
+
+typedef struct ALXRViewConfig {
+    ALXREyeInfo eyeInfo;
+    ALXRHiddenAreaMesh hidden_area_meshes[2];
+} ALXRViewConfig;
+
 struct ALXRVersion {
     uint32_t major;
     uint32_t minor;
@@ -132,7 +144,7 @@ struct ALXRVersion {
 typedef struct ALXRClientCtx
 {
     void (*inputSend)(const TrackingInfo* data);
-    void (*viewsConfigSend)(const ALXREyeInfo* eyeInfo);
+    void (*viewsConfigSend)(const ALXRViewConfig* view_config);
     uint64_t (*pathStringToHash)(const char* path);
     void (*timeSyncSend)(const TimeSync* data);
     void (*videoErrorReportSend)();

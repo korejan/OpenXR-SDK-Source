@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 struct ALXRStreamConfig;
 struct ALXRSystemProperties;
@@ -122,6 +123,11 @@ struct IOpenXrProgram {
 
     virtual bool GetGuardianData(ALXRGuardianData& gd) /*const*/ = 0;
 
+    struct HiddenAreaMesh final {
+        std::vector<XrVector2f> vertices;
+        std::vector<std::uint32_t> indices;
+    };
+    virtual bool GetHiddenAreaMesh(size_t /*viewIdx*/, HiddenAreaMesh& /*mesh*/) const = 0;
     virtual bool GetEyeInfo(ALXREyeInfo&, const XrTime& t) const = 0;
     virtual bool GetEyeInfo(ALXREyeInfo&) const = 0;
 

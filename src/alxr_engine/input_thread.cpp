@@ -32,14 +32,30 @@ void XrInputThread::Update(const XrInputThread::StartCtx& ctx) {
 
     const auto isConnected = m_isConnected.load();
 
-    ALXREyeInfo newEyeInfo{};
-    if (isConnected && ctx.programPtr->GetEyeInfo(newEyeInfo)) {
+    ALXRViewConfig newViewConfig = {
+        .hidden_area_meshes = {{},{}},
+    };
+    if (isConnected && ctx.programPtr->GetEyeInfo(newViewConfig.eyeInfo)) {
+        const auto& newEyeInfo = newViewConfig.eyeInfo;
         if (std::abs(newEyeInfo.ipd - m_lastEyeInfo.ipd) > 0.01f ||
             std::abs(newEyeInfo.eyeFov[0].left - m_lastEyeInfo.eyeFov[0].left) > 0.01f ||
             std::abs(newEyeInfo.eyeFov[1].left - m_lastEyeInfo.eyeFov[1].left) > 0.01f)
         {
+            std::array<IOpenXrProgram::HiddenAreaMesh, 2> hiddenAreaMeshes{};
+            for (size_t viewIdx = 0; viewIdx < 2; ++viewIdx) {
+                auto& ham = hiddenAreaMeshes[viewIdx];
+                if (!ctx.programPtr->GetHiddenAreaMesh(viewIdx, ham))
+                    break;
+                static_assert(sizeof(ALXRVector2f) == sizeof(XrVector2f));
+                newViewConfig.hidden_area_meshes[viewIdx] = {
+                    .vertices = reinterpret_cast<const ALXRVector2f*>(ham.vertices.data()),
+                    .vertexCount = static_cast<uint32_t>(ham.vertices.size()),
+                    .indices = ham.indices.data(),
+                    .indexCount = static_cast<uint32_t>(ham.indices.size())
+                };
+            }
             m_lastEyeInfo = newEyeInfo;
-            ctx.clientCtx->viewsConfigSend(&newEyeInfo);
+            ctx.clientCtx->viewsConfigSend(&newViewConfig);
             LogViewConfig(newEyeInfo);
         }
     }

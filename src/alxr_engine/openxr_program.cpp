@@ -2051,6 +2051,69 @@ struct OpenXrProgram final : IOpenXrProgram {
         m_configViews.clear();
     }
 
+    bool GetHiddenAreaMesh(size_t viewIdx, IOpenXrProgram::HiddenAreaMesh& mesh) const override {
+        if (!IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME))
+            return false;
+
+        PFN_xrGetVisibilityMaskKHR xrGetVisibilityMaskKHR = nullptr;
+        if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrGetVisibilityMaskKHR",
+            reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVisibilityMaskKHR))) ||
+            xrGetVisibilityMaskKHR == nullptr) {
+            Log::Write(Log::Level::Warning, "xrGetInstanceProcAddr failed to get address for xrGetVisibilityMaskKHR.");
+            return false;
+        }
+        
+        constexpr const XrVisibilityMaskTypeKHR visibilityMaskType = XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR;
+
+        XrVisibilityMaskKHR visibilityMask = {
+            .type = XR_TYPE_VISIBILITY_MASK_KHR,
+            .next = nullptr,
+            .vertexCapacityInput = 0,
+            .vertexCountOutput = 0,
+            .vertices = nullptr,
+            .indexCapacityInput = 0,
+            .indexCountOutput = 0,
+            .indices = nullptr
+        };
+        auto result = xrGetVisibilityMaskKHR(
+            m_session, m_viewConfigType, (uint32_t)viewIdx,
+            visibilityMaskType, &visibilityMask
+        );
+        if (XR_FAILED(result)) {
+            Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
+            return false;
+        }
+
+        mesh.indices.resize(visibilityMask.indexCountOutput);
+        visibilityMask.indexCapacityInput = visibilityMask.indexCountOutput;
+        visibilityMask.indices = mesh.indices.data();
+
+        mesh.vertices.resize(visibilityMask.vertexCountOutput, { 0,0 });
+        visibilityMask.vertexCapacityInput = visibilityMask.vertexCountOutput;
+        visibilityMask.vertices = mesh.vertices.data();
+
+        result = xrGetVisibilityMaskKHR(
+            m_session, m_viewConfigType, (uint32_t)viewIdx,
+            visibilityMaskType, &visibilityMask
+        );
+        if (XR_FAILED(result)) {
+            Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
+            return false;
+        }
+
+#if 0//def ALXR_DEBUG_VISIBILITY_MASK
+        for (std::size_t idx = 0; idx < vertices.size(); ++idx) {
+            Log::Write(Log::Level::Verbose,
+                Fmt("visibility mask vertex-%d: (%f, %f)", idx, vertices[idx].x, vertices[idx].y));
+        }
+        for (std::size_t idx = 0; idx < indices.size(); ++idx) {
+            Log::Write(Log::Level::Verbose,
+                Fmt("visibility mask index-%d: %u", idx, indices[idx]));
+        }
+#endif
+        return true;
+    }
+
     void CreateSwapchains(const std::uint32_t eyeWidth /*= 0*/, const std::uint32_t eyeHeight /*= 0*/) override {
         CHECK(m_session != XR_NULL_HANDLE);
 
@@ -2250,71 +2313,20 @@ struct OpenXrProgram final : IOpenXrProgram {
         }
 
         if (IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME)) {
-
-            //while (!::IsDebuggerPresent())  {
-            //    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            //}
-            //__debugbreak();
-
-            PFN_xrGetVisibilityMaskKHR xrGetVisibilityMaskKHR = nullptr;
-            if (XR_FAILED(xrGetInstanceProcAddr(m_instance, "xrGetVisibilityMaskKHR",
-                reinterpret_cast<PFN_xrVoidFunction*>(&xrGetVisibilityMaskKHR))) ||
-                xrGetVisibilityMaskKHR == nullptr) {
-                Log::Write(Log::Level::Warning, "xrGetInstanceProcAddr failed to get address for xrGetVisibilityMaskKHR.");
-                return;
-            }
-
-            std::vector<std::uint32_t> indices;
-            std::vector<XrVector2f> vertices;
-            constexpr const XrVisibilityMaskTypeKHR visibilityMaskType = XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR;
             for (std::uint32_t viewIdx = 0; viewIdx < viewCount; ++viewIdx) {
-
-                XrVisibilityMaskKHR visibilityMask = {
+                IOpenXrProgram::HiddenAreaMesh ham = {};
+                if (!GetHiddenAreaMesh(viewIdx, ham))
+                    break;
+                const XrVisibilityMaskKHR visibilityMask = {
                     .type = XR_TYPE_VISIBILITY_MASK_KHR,
                     .next = nullptr,
-                    .vertexCapacityInput = 0,
-                    .vertexCountOutput = 0,
-                    .vertices = nullptr,
-                    .indexCapacityInput = 0,
-                    .indexCountOutput = 0,
-                    .indices = nullptr
+                    .vertexCapacityInput = (uint32_t)ham.vertices.size(),
+                    .vertexCountOutput = (uint32_t)ham.vertices.size(),
+                    .vertices = ham.vertices.data(),
+                    .indexCapacityInput = (uint32_t)ham.indices.size(),
+                    .indexCountOutput = (uint32_t)ham.indices.size(),
+                    .indices = ham.indices.data()
                 };
-                auto result = xrGetVisibilityMaskKHR(
-                    m_session, m_viewConfigType, viewIdx,
-                    visibilityMaskType, &visibilityMask
-                );
-                if (XR_FAILED(result)) {
-                    Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
-                    return;
-                }
-                
-                indices.resize(visibilityMask.indexCountOutput);
-                visibilityMask.indexCapacityInput = visibilityMask.indexCountOutput;
-                visibilityMask.indices = indices.data();
-
-                vertices.resize(visibilityMask.vertexCountOutput, { 0,0 });
-                visibilityMask.vertexCapacityInput = visibilityMask.vertexCountOutput;
-                visibilityMask.vertices = vertices.data();
-
-                result = xrGetVisibilityMaskKHR(
-                    m_session, m_viewConfigType, viewIdx,
-                    visibilityMaskType, &visibilityMask
-                );
-                if (XR_FAILED(result)) {
-                    Log::Write(Log::Level::Error, Fmt("xrGetVisibilityMaskKHR failed with error %d", result));
-                    return;
-                }
-
-#if 0//def ALXR_DEBUG_VISIBILITY_MASK
-                for (std::size_t idx = 0; idx < vertices.size(); ++idx) {
-                    Log::Write(Log::Level::Verbose,
-                        Fmt("visibility mask vertex-%d: (%f, %f)", idx, vertices[idx].x, vertices[idx].y));
-                }
-                for (std::size_t idx = 0; idx < indices.size(); ++idx) {
-                    Log::Write(Log::Level::Verbose,
-                        Fmt("visibility mask index-%d: %u", idx, indices[idx]));
-                }
-#endif
                 if (!m_graphicsPlugin->SetVisibilityMask(viewIdx, visibilityMask)) {
                     Log::Write(Log::Level::Error, Fmt("SetVisibilityMask failed"));
                     return;
