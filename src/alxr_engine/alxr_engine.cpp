@@ -121,6 +121,7 @@ bool alxr_init(const ALXRClientCtx* rCtx, /*[out]*/ ALXRSystemProperties* system
         options->TrackingServerPortNo = static_cast<std::uint16_t>(ctx.trackingServerPortNo);
         options->SimulateHeadless = ctx.simulateHeadless;
         options->PassthroughMode = ctx.passthroughMode;
+        options->NoVisibilityMasks = ctx.noVisibilityMasks;
         if (ctx.internalDataPath != nullptr) {
             std::error_code ec;
             options->InternalDataPath = ctx.internalDataPath;

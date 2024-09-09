@@ -185,6 +185,7 @@ typedef struct ALXRClientCtx
     // In the absence of native support, will attempt to simulate a headless session.
     // Caution: May not be compatible with all runtimes and could lead to unexpected behavior.
     bool simulateHeadless;
+    bool noVisibilityMasks;
 
 #ifdef XR_USE_PLATFORM_ANDROID
     void* applicationVM;

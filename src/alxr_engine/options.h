@@ -142,6 +142,7 @@ struct Options {
     bool NoPassthrough = false;
     bool NoHandTracking = false;
     bool SimulateHeadless = false;
+    bool NoVisibilityMasks = false;
 
     struct {
         XrFormFactor FormFactor{XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY};
@@ -193,5 +194,9 @@ struct Options {
 
     inline bool IsFaceTrackingSourceEnabled(const std::uint32_t source) const {
         return (FaceTrackingDataSources & source) != 0;
+    }
+
+    inline bool EnableVisibilityMasks() const {
+        return !(NoVisibilityMasks || EnableHeadless());
     }
 };

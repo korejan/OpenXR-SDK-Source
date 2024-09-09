@@ -694,6 +694,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             if (m_options == nullptr)
                 return {};
             return {
+                { XR_KHR_VISIBILITY_MASK_EXTENSION_NAME,      !m_options->EnableVisibilityMasks() },
                 { XR_EXT_HAND_TRACKING_EXTENSION_NAME,        m_options->NoHandTracking || IsPrePicoPUI<5,7>() },
                 { XR_MND_HEADLESS_EXTENSION_NAME,             !m_options->EnableHeadless()},
                 { XR_FB_PASSTHROUGH_EXTENSION_NAME,           m_options->NoPassthrough },
