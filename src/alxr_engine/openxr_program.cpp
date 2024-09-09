@@ -2114,6 +2114,35 @@ struct OpenXrProgram final : IOpenXrProgram {
         return true;
     }
 
+    bool UpdateHiddenAreaMeshes() {
+        if (!IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME))
+            return true;
+        assert(m_graphicsPlugin != nullptr);
+        for (std::uint32_t viewIdx = 0; viewIdx < m_views.size(); ++viewIdx) {
+            IOpenXrProgram::HiddenAreaMesh ham = {};
+            if (!GetHiddenAreaMesh(viewIdx, ham))
+                break;
+            const XrVisibilityMaskKHR visibilityMask = {
+                .type = XR_TYPE_VISIBILITY_MASK_KHR,
+                .next = nullptr,
+                .vertexCapacityInput = (uint32_t)ham.vertices.size(),
+                .vertexCountOutput = (uint32_t)ham.vertices.size(),
+                .vertices = ham.vertices.data(),
+                .indexCapacityInput = (uint32_t)ham.indices.size(),
+                .indexCountOutput = (uint32_t)ham.indices.size(),
+                .indices = ham.indices.data()
+            };
+            if (!m_graphicsPlugin->SetVisibilityMask(viewIdx, visibilityMask)) {
+                Log::Write(Log::Level::Error, Fmt("SetVisibilityMask failed"));
+                return false;
+            }
+        }
+        // TODO: Refactor OpenXR event handling and input thread
+        //       and send new view config message (with updated HAMs) when
+        //       visibility mask change events occur.
+        return true;
+    }
+
     void CreateSwapchains(const std::uint32_t eyeWidth /*= 0*/, const std::uint32_t eyeHeight /*= 0*/) override {
         CHECK(m_session != XR_NULL_HANDLE);
 
@@ -2312,27 +2341,7 @@ struct OpenXrProgram final : IOpenXrProgram {
             }
         }
 
-        if (IsExtEnabled(XR_KHR_VISIBILITY_MASK_EXTENSION_NAME)) {
-            for (std::uint32_t viewIdx = 0; viewIdx < viewCount; ++viewIdx) {
-                IOpenXrProgram::HiddenAreaMesh ham = {};
-                if (!GetHiddenAreaMesh(viewIdx, ham))
-                    break;
-                const XrVisibilityMaskKHR visibilityMask = {
-                    .type = XR_TYPE_VISIBILITY_MASK_KHR,
-                    .next = nullptr,
-                    .vertexCapacityInput = (uint32_t)ham.vertices.size(),
-                    .vertexCountOutput = (uint32_t)ham.vertices.size(),
-                    .vertices = ham.vertices.data(),
-                    .indexCapacityInput = (uint32_t)ham.indices.size(),
-                    .indexCountOutput = (uint32_t)ham.indices.size(),
-                    .indices = ham.indices.data()
-                };
-                if (!m_graphicsPlugin->SetVisibilityMask(viewIdx, visibilityMask)) {
-                    Log::Write(Log::Level::Error, Fmt("SetVisibilityMask failed"));
-                    return;
-                }
-            }
-        }
+        UpdateHiddenAreaMeshes();
     }
 
     // Return event if one is available, otherwise return null.
@@ -2356,9 +2365,11 @@ struct OpenXrProgram final : IOpenXrProgram {
     }
 
     void PollEvents(bool* exitRenderLoop, bool* requestRestart) override {
+        assert(exitRenderLoop != nullptr && requestRestart != nullptr);
         *exitRenderLoop = *requestRestart = false;
 
         PollStreamConfigEvents();
+        bool visibilityMaskChanged = false;
 
         // Process all pending messages.
         while (const XrEventDataBaseHeader* event = TryReadNextEvent()) {
@@ -2406,6 +2417,7 @@ struct OpenXrProgram final : IOpenXrProgram {
                     const auto& visibilityMaskChangedEvent = *reinterpret_cast<const XrEventDataVisibilityMaskChangedKHR*>(event);
                     Log::Write(Log::Level::Verbose,
                                Fmt("visibility mask changed for view %d", visibilityMaskChangedEvent.viewIndex));
+                    visibilityMaskChanged = true;
                     break;
                 }
                 default: {
@@ -2413,6 +2425,9 @@ struct OpenXrProgram final : IOpenXrProgram {
                     break;
                 }
             }
+        }
+        if (visibilityMaskChanged) {
+            UpdateHiddenAreaMeshes();
         }
     }
 
