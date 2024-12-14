@@ -2678,7 +2678,8 @@ struct OpenXrProgram final : IOpenXrProgram {
     {
         return !IsRuntime(OxrRuntimeType::SteamVR) &&
                !IsRuntime(OxrRuntimeType::Monado) &&
-               !IsRuntime(OxrRuntimeType::SnapdragonMonado);
+               !IsRuntime(OxrRuntimeType::SnapdragonMonado) &&
+               !IsRuntime(OxrRuntimeType::AndroidXR);
     }
 
     inline XrCompositionLayerPassthroughFB MakeCompositionLayerPassthroughFB() const {

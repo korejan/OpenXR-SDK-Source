@@ -38,6 +38,7 @@ enum class OxrRuntimeType
     HTCWave,
     MagicLeap,
     SnapdragonMonado,
+    AndroidXR,
     Unknown,
 ////////////////////////
     TypeCount
@@ -53,6 +54,7 @@ constexpr inline std::string_view ToString(const OxrRuntimeType t) {
     case OxrRuntimeType::HTCWave:   return "VIVE WAVE";
     case OxrRuntimeType::MagicLeap: return "MAGICLEAP";
     case OxrRuntimeType::SnapdragonMonado: return "Snapdragon";
+    case OxrRuntimeType::AndroidXR: return "Android XR";
     default: return "Unknown";
     }
 }
