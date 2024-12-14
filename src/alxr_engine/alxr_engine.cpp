@@ -122,6 +122,7 @@ bool alxr_init(const ALXRClientCtx* rCtx, /*[out]*/ ALXRSystemProperties* system
         options->SimulateHeadless = ctx.simulateHeadless;
         options->PassthroughMode = ctx.passthroughMode;
         options->NoVisibilityMasks = ctx.noVisibilityMasks;
+        options->NoMultiviewRendering = ctx.noMultiviewRendering;
         if (ctx.internalDataPath != nullptr) {
             std::error_code ec;
             options->InternalDataPath = ctx.internalDataPath;

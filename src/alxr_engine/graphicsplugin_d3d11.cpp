@@ -227,11 +227,13 @@ struct D3D11GraphicsPlugin final : public IGraphicsPlugin {
     }
 
     void InitializeResources() {
-        D3D11_FEATURE_DATA_D3D11_OPTIONS3 options{
-            .VPAndRTArrayIndexFromAnyShaderFeedingRasterizer = false
-        };
-        if (SUCCEEDED(m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options)))) {
-            m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
+        if (!m_options->NoMultiviewRendering) {
+            D3D11_FEATURE_DATA_D3D11_OPTIONS3 options{
+                .VPAndRTArrayIndexFromAnyShaderFeedingRasterizer = false
+            };
+            if (SUCCEEDED(m_device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS3, &options, sizeof(options)))) {
+                m_isMultiViewSupported = options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
+            }
         }
 
         CoreShaders::Path smDir = m_isMultiViewSupported ? "SM5/multivew" : "SM5";

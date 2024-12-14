@@ -2286,6 +2286,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
         if (options) {
             m_noServerFramerateLock = options->NoServerFramerateLock;
             m_noFrameSkip = options->NoFrameSkip;
+            m_noMultiview = options->NoMultiviewRendering;
         }
     };
 
@@ -2655,24 +2656,26 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
             VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME
         };
 
-        const auto [multiviewFeature, multiviewProps] = GetMultiviewFeature();
-        if (multiviewFeature.multiview && multiviewProps.maxMultiviewViewCount > 1) {
-            m_isMultiViewSupported = true;
-            deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);            
-            Log::Write(Log::Level::Verbose, Fmt(
-                "VulkanGraphicsPlugin: Multiview features:\n"
-                "\tmultiview: %s\n"
-                "\tmultiviewGeometryShader: %s\n"
-                "\tmultiviewTessellationShader: %s",
-                multiviewFeature.multiview ? "true" : "false",
-                multiviewFeature.multiviewGeometryShader ? "true" : "false",
-                multiviewFeature.multiviewTessellationShader ? "true" : "false"));
-            Log::Write(Log::Level::Verbose, Fmt(
-                "VulkanGraphicsPlugin: Multiview properties:\n"
-                "\tmaxMultiviewViewCount: %d\n"
-                "\tmaxMultiviewInstanceIndex: %d",
-                multiviewProps.maxMultiviewViewCount,
-                multiviewProps.maxMultiviewInstanceIndex));
+        if (!m_noMultiview) {
+            const auto [multiviewFeature, multiviewProps] = GetMultiviewFeature();
+            if (multiviewFeature.multiview && multiviewProps.maxMultiviewViewCount > 1) {
+                m_isMultiViewSupported = true;
+                deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+                Log::Write(Log::Level::Verbose, Fmt(
+                    "VulkanGraphicsPlugin: Multiview features:\n"
+                    "\tmultiview: %s\n"
+                    "\tmultiviewGeometryShader: %s\n"
+                    "\tmultiviewTessellationShader: %s",
+                    multiviewFeature.multiview ? "true" : "false",
+                    multiviewFeature.multiviewGeometryShader ? "true" : "false",
+                    multiviewFeature.multiviewTessellationShader ? "true" : "false"));
+                Log::Write(Log::Level::Verbose, Fmt(
+                    "VulkanGraphicsPlugin: Multiview properties:\n"
+                    "\tmaxMultiviewViewCount: %d\n"
+                    "\tmaxMultiviewInstanceIndex: %d",
+                    multiviewProps.maxMultiviewViewCount,
+                    multiviewProps.maxMultiviewInstanceIndex));
+            }
         }
 
         VkPhysicalDeviceFeatures features{};
@@ -5111,6 +5114,7 @@ struct VulkanGraphicsPlugin : public IGraphicsPlugin {
     
     bool m_noServerFramerateLock = false;
     bool m_noFrameSkip = false;
+    bool m_noMultiview = false;
 
 // END VIDEO STREAM DATA /////////////////////////////////////////////////////////////
 

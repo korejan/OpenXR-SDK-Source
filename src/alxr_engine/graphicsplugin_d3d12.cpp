@@ -373,16 +373,18 @@ struct D3D12GraphicsPlugin final : public IGraphicsPlugin {
         const auto highestShaderModel = GetHighestSupportedShaderModel();
         Log::Write(Log::Level::Verbose, Fmt("Highest supported shader model: 0x%02x", highestShaderModel));
 
-        D3D12_FEATURE_DATA_D3D12_OPTIONS3 options {
-            .ViewInstancingTier = D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED
-        };
-        ComPtr<ID3D12Device2> device2{ nullptr };
-        if (SUCCEEDED(m_device.As(&device2)) && device2 != nullptr &&
-            SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options)))) {
-            m_isMultiViewSupported = 
-                highestShaderModel >= D3D_SHADER_MODEL_6_1 &&
-                options.ViewInstancingTier != D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED;
-            Log::Write(Log::Level::Verbose, Fmt("D3D12 View-instancing tier: %d", options.ViewInstancingTier));
+        if (!m_options->NoMultiviewRendering) {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS3 options {
+                .ViewInstancingTier = D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED
+            };
+            ComPtr<ID3D12Device2> device2{ nullptr };
+            if (SUCCEEDED(m_device.As(&device2)) && device2 != nullptr &&
+                SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options)))) {
+                m_isMultiViewSupported =
+                    highestShaderModel >= D3D_SHADER_MODEL_6_1 &&
+                    options.ViewInstancingTier != D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED;
+                Log::Write(Log::Level::Verbose, Fmt("D3D12 View-instancing tier: %d", options.ViewInstancingTier));
+            }
         }
 
         CoreShaders::Path smDir{ "SM5" };

@@ -186,6 +186,7 @@ typedef struct ALXRClientCtx
     // Caution: May not be compatible with all runtimes and could lead to unexpected behavior.
     bool simulateHeadless;
     bool noVisibilityMasks;
+    bool noMultiviewRendering;
 
 #ifdef XR_USE_PLATFORM_ANDROID
     void* applicationVM;

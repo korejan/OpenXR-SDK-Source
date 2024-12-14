@@ -143,6 +143,7 @@ struct Options {
     bool NoHandTracking = false;
     bool SimulateHeadless = false;
     bool NoVisibilityMasks = false;
+    bool NoMultiviewRendering = false;
 
     struct {
         XrFormFactor FormFactor{XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY};
