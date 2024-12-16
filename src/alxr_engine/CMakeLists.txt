@@ -215,6 +215,8 @@ endif()
 #    add_definitions(-DXR_USE_OXR_OCULUS)
 #endif()
 
+set(ANDROID_XR_EXT_HEADERS ${PROJECT_SOURCE_DIR}/src/external/android-xr)
+
 target_include_directories(alxr_engine
     PRIVATE
     ${PROJECT_SOURCE_DIR}/src
@@ -225,6 +227,7 @@ target_include_directories(alxr_engine
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_BINARY_DIR}/include
     ${OCULUS_OXR_EXT_HEADERS}
+    ${ANDROID_XR_EXT_HEADERS}
 
     # for helper headers
     ${PROJECT_SOURCE_DIR}/external/include
