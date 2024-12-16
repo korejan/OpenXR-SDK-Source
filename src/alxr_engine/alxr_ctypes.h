@@ -40,6 +40,7 @@ enum class ALXRFacialExpressionType : uint8_t {
     FB_V2,
     HTC,
     Pico,
+    Android, // XR_ANDROID_face_tracking
     Auto,
     TypeCount
 };

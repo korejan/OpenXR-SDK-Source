@@ -24,6 +24,7 @@ inline constexpr const std::size_t MaxExpressionCount = 70;
 static_assert((XR_FACIAL_EXPRESSION_LIP_COUNT_HTC + XR_FACIAL_EXPRESSION_EYE_COUNT_HTC) <= MaxExpressionCount);
 static_assert(XR_FACE_EXPRESSION2_COUNT_FB <= MaxExpressionCount);
 static_assert(XR_FACE_EXPRESSION_COUNT_FB <= MaxExpressionCount);
+static_assert(XR_FACE_PARAMETER_COUNT_ANDROID <= MaxExpressionCount);
 
 #pragma pack(push, 1)
 struct ALXRFacialEyePacket {
