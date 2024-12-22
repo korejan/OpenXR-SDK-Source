@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cinttypes>
 #include <cassert>
 #include <cstring>
 #include <ctime>
@@ -2434,23 +2435,25 @@ struct OpenXrProgram final : IOpenXrProgram {
 
         if (m_isMultiViewEnabled)
         {
-            CHECK(m_configViews[0].recommendedImageRectWidth ==
-                  m_configViews[1].recommendedImageRectWidth);
-            CHECK(m_configViews[0].recommendedImageRectHeight ==
-                  m_configViews[1].recommendedImageRectHeight);
-            CHECK(m_configViews[0].recommendedSwapchainSampleCount ==
-                  m_configViews[1].recommendedSwapchainSampleCount);
+            const XrViewConfigurationView& vp = [&]() {
+                assert(m_configViews.size() > 1);
+                const auto vpItr = std::max_element(m_configViews.begin(), m_configViews.end(), [](const auto& vp1, const auto& vp2) {
+                    const size_t vp1Size = vp1.recommendedImageRectWidth * vp1.recommendedImageRectHeight;
+                    const size_t vp2Size = vp2.recommendedImageRectWidth * vp2.recommendedImageRectHeight;
+                    return vp1Size < vp2Size;
+                });
+                if (vpItr == m_configViews.end())
+                    return m_configViews[0];
+                return *vpItr;
+            }();
             
-            for (std::size_t i = 0; i < viewCount; ++i) {
-                const XrViewConfigurationView& vp = m_configViews[i];
-                Log::Write(Log::Level::Info, Fmt
-                (
-                    "Creating swapchain for view %d with dimensions Width=%d Height=%d SampleCount=%d", i,
-                    vp.recommendedImageRectWidth, vp.recommendedImageRectHeight, vp.recommendedSwapchainSampleCount
-                ));
-            }
+            Log::Write(Log::Level::Info, Fmt
+            (
+                "Creating swapchain with texture array size=%" PRIu32
+                ", dimensions Width=%" PRIu32 " Height=%" PRIu32 " SampleCount=%" PRIu32, viewCount,
+                vp.recommendedImageRectWidth, vp.recommendedImageRectHeight, vp.recommendedSwapchainSampleCount
+            ));
 
-            const auto& vp = m_configViews[0];
             // Create the swapchain.
             const XrSwapchainCreateInfo swapchainCreateInfo{
                 .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
