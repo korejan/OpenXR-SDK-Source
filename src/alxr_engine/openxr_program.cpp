@@ -2288,7 +2288,21 @@ struct OpenXrProgram final : IOpenXrProgram {
             return false;
         }
 
-#if 0//def ALXR_DEBUG_VISIBILITY_MASK
+#ifdef XR_USE_PLATFORM_WIN32
+        // Meta-link (not standalone) runtime outputs visiblity mask upside down,
+        if (IsRuntime(OxrRuntimeType::Oculus) && mesh.vertices.size() > 0) {
+            const auto [minY, maxY] =
+                std::minmax_element(mesh.vertices.begin(), mesh.vertices.end(), [](const auto& v1, const auto& v2) {
+                    return v1.y < v2.y;
+                });
+            const float flipAxisY = minY->y + maxY->y;
+            for (auto& vert : mesh.vertices) {
+                vert.y = flipAxisY - vert.y;
+            }
+        }
+#endif
+
+#ifdef ALXR_DEBUG_VISIBILITY_MASK
         for (std::size_t idx = 0; idx < vertices.size(); ++idx) {
             Log::Write(Log::Level::Verbose,
                 Fmt("visibility mask vertex-%d: (%f, %f)", idx, vertices[idx].x, vertices[idx].y));
