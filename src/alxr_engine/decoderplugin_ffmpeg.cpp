@@ -158,6 +158,7 @@ constexpr inline XrPixelFormat ToXrPixelFormat(const AVPixelFormat pixFmt)
     {
     case AV_PIX_FMT_NV12:
     case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVJ420P:
         return XrPixelFormat::NV12;
     case AV_PIX_FMT_P010LE:
     case AV_PIX_FMT_YUV420P10LE:
@@ -172,6 +173,7 @@ constexpr inline XrPixelFormat ToXrPixel3PlaneFormat(const AVPixelFormat pixFmt)
     {
     case AV_PIX_FMT_NV12:
     case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVJ420P:
         return XrPixelFormat::G8_B8_R8_3PLANE_420;
     case AV_PIX_FMT_P010LE:
     case AV_PIX_FMT_YUV420P10LE:
