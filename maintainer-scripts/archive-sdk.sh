@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2019-2024, The Khronos Group Inc.
+# Copyright (c) 2019-2025 The Khronos Group Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -70,6 +70,7 @@ makeSubset "$TARNAME" $(getSDKFilenames)
 
 # Read the list of headers we should generate, and generate them.
 while read -r header; do
+    header=$(echo "$header" | sed 's/[[:space:]]*$//')
     generate_spec include/openxr "$header" "$TARNAME"
 done < include/generated_header_list.txt
 

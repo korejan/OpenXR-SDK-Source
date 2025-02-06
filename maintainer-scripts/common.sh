@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (c) 2019-2024, The Khronos Group Inc.
+# Copyright (c) 2019-2025 The Khronos Group Inc.
 #
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -167,6 +167,7 @@ getSDKSourceFilenames() {
         .github/dependabot.yml \
         .github/scripts \
         .github/workflows/android.yml \
+        .github/workflows/build-macos.yml \
         .github/workflows/check_clang_format_and_codespell.yml \
         .github/workflows/gradle-wrapper-validation.yml \
         .github/workflows/msvc-build-preset.yml \
